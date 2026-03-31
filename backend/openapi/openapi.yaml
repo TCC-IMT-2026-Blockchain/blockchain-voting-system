@@ -1,0 +1,959 @@
+openapi: 3.1.0
+info:
+  title: Block Vote API
+  version: 0.1.0
+  description: |
+    Contract-first API for the blockchain voting TCC project.
+
+    Test version Front-End.
+servers:
+  - url: http://localhost:3333/api/v1
+    description: Local development server
+tags:
+  - name: Health
+  - name: Auth
+  - name: Elections
+  - name: Admin
+  - name: Voting
+  - name: Verification
+  - name: Audit
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Health check
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in and create a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Get the current authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUserResponse'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: End the current session
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Session ended
+
+  /elections:
+    get:
+      tags: [Elections]
+      operationId: listElections
+      summary: List elections visible to the current user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          required: false
+          schema:
+            $ref: '#/components/schemas/ElectionStatus'
+          description: Optional status filter
+      responses:
+        '200':
+          description: Elections list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionListResponse'
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /elections/{electionId}:
+    get:
+      tags: [Elections]
+      operationId: getElectionById
+      summary: Get election metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+      responses:
+        '200':
+          description: Election metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionDetailResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /elections/{electionId}/ballot:
+    get:
+      tags: [Elections]
+      operationId: getElectionBallot
+      summary: Get the ballot structure and candidates for a specific election
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+      responses:
+        '200':
+          description: Ballot definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionBallotResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/elections:
+    post:
+      tags: [Admin]
+      operationId: createElection
+      summary: Create a new election
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateElectionRequest'
+      responses:
+        '201':
+          description: Election created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionDetailResponse'
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/elections/{electionId}:
+    patch:
+      tags: [Admin]
+      operationId: updateElection
+      summary: Update election metadata or status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateElectionRequest'
+      responses:
+        '200':
+          description: Election updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionDetailResponse'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/elections/{electionId}/candidates:
+    post:
+      tags: [Admin]
+      operationId: createCandidate
+      summary: Add a candidate to an election position
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCandidateRequest'
+      responses:
+        '201':
+          description: Candidate created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateResponse'
+        '403':
+          description: Admin role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Election or position not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /votes:
+    post:
+      tags: [Voting]
+      operationId: submitVote
+      summary: Submit a vote commitment and cryptographic payload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoteSubmissionRequest'
+      responses:
+        '201':
+          description: Vote accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoteSubmissionResponse'
+        '400':
+          description: Invalid payload or election not open
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate vote detected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /votes/receipts/{receiptId}:
+    get:
+      tags: [Voting]
+      operationId: getVoteReceipt
+      summary: Get the receipt issued after a vote submission
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+      responses:
+        '200':
+          description: Vote receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoteReceiptResponse'
+        '404':
+          description: Receipt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /verification/receipts/{receiptId}:
+    get:
+      tags: [Verification]
+      operationId: verifyReceipt
+      summary: Verify whether a receipt exists and was included in the ledger
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+      responses:
+        '200':
+          description: Receipt verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceiptVerificationResponse'
+        '404':
+          description: Receipt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audit/elections/{electionId}/results:
+    get:
+      tags: [Audit]
+      operationId: getElectionResults
+      summary: Get public results for an election
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+      responses:
+        '200':
+          description: Public election results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElectionResultsResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /audit/elections/{electionId}/ledger:
+    get:
+      tags: [Audit]
+      operationId: getElectionLedger
+      summary: Get public ledger entries for an election
+      parameters:
+        - $ref: '#/components/parameters/ElectionId'
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: pageSize
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Public ledger entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLedgerResponse'
+        '404':
+          description: Election not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ElectionId:
+      in: path
+      name: electionId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReceiptId:
+      in: path
+      name: receiptId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, timestamp, version]
+      properties:
+        status:
+          type: string
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+          example: 0.1.0
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: elector@example.com
+        password:
+          type: string
+          format: password
+          example: demo123
+
+    UserRole:
+      type: string
+      enum: [ELECTOR, ADMIN, AUDITOR]
+
+    UserProfile:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Demo Elector
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    SessionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [accessToken, expiresAt, user]
+          properties:
+            accessToken:
+              type: string
+              example: demo-elector-token
+            expiresAt:
+              type: string
+              format: date-time
+            user:
+              $ref: '#/components/schemas/UserProfile'
+
+    CurrentUserResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/UserProfile'
+
+    ElectionStatus:
+      type: string
+      enum: [DRAFT, SCHEDULED, OPEN, CLOSED, TALLIED, ARCHIVED]
+
+    Candidate:
+      type: object
+      required: [id, electionId, positionId, name, number]
+      properties:
+        id:
+          type: string
+          format: uuid
+        electionId:
+          type: string
+          format: uuid
+        positionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Alice Johnson
+        number:
+          type: string
+          example: '10'
+        party:
+          type: string
+          nullable: true
+          example: Independent
+        photoUrl:
+          type: string
+          format: uri
+          nullable: true
+          example: https://example.com/candidates/alice.jpg
+
+    BallotPosition:
+      type: object
+      required: [id, title, minSelections, maxSelections, candidates]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Class Representative
+        minSelections:
+          type: integer
+          minimum: 0
+          example: 1
+        maxSelections:
+          type: integer
+          minimum: 1
+          example: 1
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Candidate'
+
+    ElectionSummary:
+      type: object
+      required:
+        [id, title, description, status, startsAt, endsAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: Computer Engineering Council 2026
+        description:
+          type: string
+          example: Demo election for the final project
+        status:
+          $ref: '#/components/schemas/ElectionStatus'
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+
+    ElectionDetail:
+      allOf:
+        - $ref: '#/components/schemas/ElectionSummary'
+        - type: object
+          required: [createdAt, updatedAt, positions]
+          properties:
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            positions:
+              type: array
+              items:
+                $ref: '#/components/schemas/BallotPosition'
+
+    ElectionListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ElectionSummary'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    ElectionDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/ElectionDetail'
+
+    ElectionBallotResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [electionId, title, positions]
+          properties:
+            electionId:
+              type: string
+              format: uuid
+            title:
+              type: string
+            positions:
+              type: array
+              items:
+                $ref: '#/components/schemas/BallotPosition'
+
+    CreateElectionRequest:
+      type: object
+      required: [title, description, startsAt, endsAt, positions]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        positions:
+          type: array
+          items:
+            type: object
+            required: [title, minSelections, maxSelections]
+            properties:
+              title:
+                type: string
+              minSelections:
+                type: integer
+                minimum: 0
+              maxSelections:
+                type: integer
+                minimum: 1
+
+    UpdateElectionRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: '#/components/schemas/ElectionStatus'
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+
+    CreateCandidateRequest:
+      type: object
+      required: [positionId, name, number]
+      properties:
+        positionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        number:
+          type: string
+        party:
+          type: string
+          nullable: true
+        photoUrl:
+          type: string
+          format: uri
+          nullable: true
+
+    CandidateResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Candidate'
+
+    VoteSelection:
+      type: object
+      required: [positionId, candidateId]
+      properties:
+        positionId:
+          type: string
+          format: uuid
+        candidateId:
+          type: string
+          format: uuid
+
+    VoteSubmissionRequest:
+      type: object
+      required:
+        - electionId
+        - encryptedBallot
+        - ballotCommitment
+        - nullifier
+        - selections
+      properties:
+        electionId:
+          type: string
+          format: uuid
+        selections:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/VoteSelection'
+        encryptedBallot:
+          type: string
+          description: Opaque encrypted payload generated on the client side.
+          example: base64:ZXhhbXBsZS1lbmNyeXB0ZWQtYmFsbG90
+        ballotCommitment:
+          type: string
+          example: 0x88b73d5b4f6d2d9ab8d1e5b1f4355d2bdf9982f31ef1b2d9cb93de3d9c181111
+        nullifier:
+          type: string
+          example: 0xfake-nullifier-001
+        clientTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+        deviceInfo:
+          type: object
+          nullable: true
+          properties:
+            platform:
+              type: string
+              example: web
+            appVersion:
+              type: string
+              example: 0.1.0
+
+    VoteSubmissionResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required:
+            [receiptId, electionId, receiptHash, ballotCommitment, transactionHash, status]
+          properties:
+            receiptId:
+              type: string
+              format: uuid
+            electionId:
+              type: string
+              format: uuid
+            receiptHash:
+              type: string
+              example: 0xreceipt-hash-001
+            ballotCommitment:
+              type: string
+            transactionHash:
+              type: string
+              example: 0xtxhash001
+            status:
+              type: string
+              enum: [PENDING, ACCEPTED, INCLUDED]
+
+    VoteReceipt:
+      type: object
+      required: [receiptId, electionId, receiptHash, ballotCommitment, transactionHash, status, issuedAt]
+      properties:
+        receiptId:
+          type: string
+          format: uuid
+        electionId:
+          type: string
+          format: uuid
+        receiptHash:
+          type: string
+        ballotCommitment:
+          type: string
+        transactionHash:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, ACCEPTED, INCLUDED]
+        issuedAt:
+          type: string
+          format: date-time
+        blockNumber:
+          type: integer
+          nullable: true
+        ledgerTimestamp:
+          type: string
+          format: date-time
+          nullable: true
+
+    VoteReceiptResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/VoteReceipt'
+
+    ReceiptVerificationResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [receiptId, verified, inclusionStatus, transactionHash]
+          properties:
+            receiptId:
+              type: string
+              format: uuid
+            verified:
+              type: boolean
+            inclusionStatus:
+              type: string
+              enum: [NOT_FOUND, PENDING, INCLUDED]
+            transactionHash:
+              type: string
+              nullable: true
+            blockNumber:
+              type: integer
+              nullable: true
+            ledgerTimestamp:
+              type: string
+              format: date-time
+              nullable: true
+
+    ResultItem:
+      type: object
+      required: [positionId, positionTitle, candidateId, candidateName, voteCount]
+      properties:
+        positionId:
+          type: string
+          format: uuid
+        positionTitle:
+          type: string
+        candidateId:
+          type: string
+          format: uuid
+        candidateName:
+          type: string
+        voteCount:
+          type: integer
+          minimum: 0
+
+    ElectionResultsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [electionId, status, publishedAt, resultHash, items]
+          properties:
+            electionId:
+              type: string
+              format: uuid
+            status:
+              $ref: '#/components/schemas/ElectionStatus'
+            publishedAt:
+              type: string
+              format: date-time
+              nullable: true
+            resultHash:
+              type: string
+              nullable: true
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/ResultItem'
+
+    AuditLedgerEntry:
+      type: object
+      required:
+        [id, electionId, transactionHash, receiptHash, ballotCommitment, blockNumber, timestamp]
+      properties:
+        id:
+          type: string
+          format: uuid
+        electionId:
+          type: string
+          format: uuid
+        transactionHash:
+          type: string
+        receiptHash:
+          type: string
+        ballotCommitment:
+          type: string
+        blockNumber:
+          type: integer
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+
+    AuditLedgerResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLedgerEntry'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    PaginationMeta:
+      type: object
+      required: [page, pageSize, total]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: AUTH_INVALID_CREDENTIALS
+            message:
+              type: string
+              example: Invalid email or password.
+            details:
+              type: object
+              additionalProperties: true
+              nullable: true
+            requestId:
+              type: string
+              nullable: true

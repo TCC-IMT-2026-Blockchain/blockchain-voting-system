@@ -1,0 +1,52 @@
+### Health check
+GET http://localhost:3333/api/v1/health
+
+### Login as elector
+POST http://localhost:3333/api/v1/auth/login
+Content-Type: application/json
+
+{
+  "email": "elector@example.com",
+  "password": "demo123"
+}
+
+### Get current user
+GET http://localhost:3333/api/v1/auth/me
+Authorization: Bearer demo-elector-token
+
+### List elections
+GET http://localhost:3333/api/v1/elections
+Authorization: Bearer demo-elector-token
+
+### Get ballot
+GET http://localhost:3333/api/v1/elections/2a3c4d5e-1111-4a4a-bbbb-111111111111/ballot
+Authorization: Bearer demo-elector-token
+
+### Submit vote
+POST http://localhost:3333/api/v1/votes
+Authorization: Bearer demo-elector-token
+Content-Type: application/json
+
+{
+  "electionId": "2a3c4d5e-1111-4a4a-bbbb-111111111111",
+  "selections": [
+    {
+      "positionId": "8f7a6b5c-1111-4c4c-aaaa-222222222222",
+      "candidateId": "10000000-0000-4000-8000-000000000010"
+    }
+  ],
+  "encryptedBallot": "base64:ZXhhbXBsZS1lbmNyeXB0ZWQtYmFsbG90",
+  "ballotCommitment": "0xnew-ballot-commitment-001",
+  "nullifier": "0xnew-nullifier-001",
+  "clientTimestamp": "2026-04-03T13:30:00.000Z",
+  "deviceInfo": {
+    "platform": "web",
+    "appVersion": "0.1.0"
+  }
+}
+
+### Verify receipt (public endpoint)
+GET http://localhost:3333/api/v1/verification/receipts/9d9b9f9a-1111-4222-8333-444444444444
+
+### Audit ledger (public endpoint)
+GET http://localhost:3333/api/v1/audit/elections/2a3c4d5e-1111-4a4a-bbbb-111111111111/ledger
