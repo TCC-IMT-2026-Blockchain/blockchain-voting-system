@@ -1,0 +1,41 @@
+services:
+  master-node:
+    build: .
+    container_name: votify-master
+    networks:
+      votify-net:
+        ipv4_address: 172.20.0.2
+    volumes:
+      - ./master-data:/root/.multichain
+    ports:
+      - "7447:7447"
+      - "7445:7445"
+    command: >
+      /bin/bash -c "
+      multichain-util create votifychain -default-rpc-port=7447 -default-p2p-port=7445 || true && 
+      multichaind votifychain -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      "
+
+  slave-node:
+    build: .
+    container_name: votify-slave
+    networks:
+      votify-net:
+        ipv4_address: 172.20.0.3
+    volumes:
+      - ./slave-data:/root/.multichain
+    depends_on:
+      - master-node
+    restart: always 
+    command: >
+      /bin/bash -c "
+      sleep 5 &&
+      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      "
+
+networks:
+  votify-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
