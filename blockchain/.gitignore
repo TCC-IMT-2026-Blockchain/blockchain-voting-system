@@ -1,0 +1,7 @@
+master-data/
+slave-data/
+reports/
+__pycache__/
+*.pyc
+*.log
+*.tmp
