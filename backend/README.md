@@ -1,48 +1,87 @@
-# Backend starter
+# Votify Backend
 
-This backend uses a contract-first workflow:
+API HTTP para operar a eleição usando a camada blockchain MultiChain.
 
-1. Design the API in `openapi/openapi.yaml`
-2. Lint and preview the contract
-3. Implement routes that honor the contract
-4. Generate frontend TypeScript types from the same contract
+## Rodar
 
-## Getting started
-
-```bash
+```powershell
 cd backend
 npm install
-cp .env.example .env
-npm run lint:openapi
 npm run dev
 ```
 
-The server will start on `http://localhost:3333`.
+Servidor padrão:
 
-## Useful scripts
-
-```bash
-npm run dev
-npm run build
-npm run lint:openapi
-npm run preview:docs
-npm run generate:frontend-types
+```text
+http://localhost:3333/api/v1
 ```
 
-## Default mock users
+## Usuários de Demonstração
 
-- Elector: `elector@example.com` / `demo123`
-- Admin: `admin@example.com` / `demo123`
-- Auditor: `auditor@example.com` / `demo123`
+```text
+admin@example.com / demo123
+elector@example.com / demo123
+auditor@example.com / demo123
+```
 
-## Main docs endpoints
+## Rotas Principais
 
-- `GET /health`
-- `GET /openapi.json`
-- `GET /docs`
+```text
+GET  /api/v1/health
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+POST /api/v1/crypto/public-key
+GET  /api/v1/elections
+GET  /api/v1/elections/:electionId
+GET  /api/v1/elections/:electionId/ballot
+POST /api/v1/admin/elections
+PATCH /api/v1/admin/elections/:electionId
+POST /api/v1/admin/elections/:electionId/candidates
+POST /api/v1/admin/elections/:electionId/voters
+POST /api/v1/elections/:electionId/credentials
+POST /api/v1/elections/:electionId/votes
+GET  /api/v1/elections/:electionId/votes/:txid/receipt
+GET  /api/v1/elections/:electionId/audit
+GET  /api/v1/blockchain/status
+```
 
-## Notes
+## Fluxo Atual
 
-- The implementation currently returns mock data so the frontend can start immediately.
-- The contract is the source of truth.
-- Once the frontend exists, `npm run generate:frontend-types` can generate TypeScript types into the frontend project.
+Cadastro:
+
+```text
+CPF + chave privada simulada
+        ↓
+backend gera chave pública
+        ↓
+backend gera hash HMAC-SHA256 do CPF
+        ↓
+blockchain registra hash do eleitor + chave pública
+```
+
+Voto:
+
+```text
+chave privada simulada + escolha
+        ↓
+backend deriva a chave pública
+        ↓
+backend encontra o eleitor cadastrado
+        ↓
+backend emite ou reutiliza a credencial
+        ↓
+blockchain registra o voto e queima o token
+```
+
+Auditoria:
+
+```text
+stream urna + tokens queimados + blocos
+        ↓
+relatório recalculado pela blockchain
+```
+
+## Observação
+
+O backend chama `../blockchain/scripts/votify.py` para operações críticas. A
+integridade continua sendo validada pela blockchain, não pela API.

@@ -7,7 +7,7 @@ var BURN_ADDRESS = "__BURN_ADDRESS__";
 var REQUIRED_AMOUNT = 1;
 
 function fail(message) {
-  return "vote transaction rejected: " + message;
+  return "Transação de voto rejeitada: " + message;
 }
 
 function isObject(value) {
@@ -37,33 +37,33 @@ function isBallotItem(item) {
 
 function validateVoteItem(item) {
   if (!item.data || typeof item.data.json === "undefined") {
-    return fail("vote data must be JSON");
+    return fail("os dados do voto devem estar em JSON");
   }
 
   var vote = item.data.json;
 
   if (!isObject(vote)) {
-    return fail("vote JSON payload must be an object");
+    return fail("o conteúdo JSON do voto deve ser um objeto");
   }
 
   if (!isNonEmptyString(vote.election_id, 64)) {
-    return fail("election_id must be a non-empty string up to 64 chars");
+    return fail("election_id deve ser um texto não vazio com até 64 caracteres");
   }
 
   if (!isNonEmptyString(vote.choice, 64)) {
-    return fail("choice must be a non-empty string up to 64 chars");
+    return fail("choice deve ser um texto não vazio com até 64 caracteres");
   }
 
   if (!/^[A-Za-z0-9_-]+$/.test(vote.election_id)) {
-    return fail("election_id contains unsupported characters");
+    return fail("election_id contém caracteres não permitidos");
   }
 
   if (!/^[A-Za-z0-9_-]+$/.test(vote.choice)) {
-    return fail("choice contains unsupported characters");
+    return fail("choice contém caracteres não permitidos");
   }
 
   if (typeof vote.schema_version !== "undefined" && vote.schema_version !== 1) {
-    return fail("unsupported schema_version");
+    return fail("schema_version não suportado");
   }
 
   var allowedFields = {
@@ -74,16 +74,16 @@ function validateVoteItem(item) {
 
   for (var field in vote) {
     if (vote.hasOwnProperty(field) && !allowedFields[field]) {
-      return fail("unsupported or identity-bearing field: " + field);
+      return fail("campo não suportado ou com dado de identidade: " + field);
     }
   }
 
   if (!hasKey(item.keys, "election:" + vote.election_id)) {
-    return fail("missing election key");
+    return fail("chave da eleição não informada");
   }
 
   if (!hasKey(item.keys, "choice:" + vote.choice)) {
-    return fail("missing choice key");
+    return fail("chave da escolha não informada");
   }
 }
 
@@ -115,7 +115,7 @@ function filtertransaction() {
   }
 
   if (ballotItems.length !== 1) {
-    return fail("vote transaction must publish exactly one ballot item");
+    return fail("a transação deve publicar exatamente um item de voto");
   }
 
   var voteError = validateVoteItem(ballotItems[0]);
@@ -126,7 +126,7 @@ function filtertransaction() {
   var balances = getfilterassetbalances(VOTE_ASSET, true);
 
   if (!balances) {
-    return fail("transaction must consume the voting asset");
+    return fail("a transação deve consumir o token de votação");
   }
 
   var sent = 0;
@@ -147,21 +147,21 @@ function filtertransaction() {
 
     if (delta > 0) {
       if (address !== BURN_ADDRESS) {
-        return fail("voting asset must be sent only to the burn address");
+        return fail("o token de votação deve ser enviado apenas ao endereço de queima");
       }
       burned += delta;
     }
   }
 
   if (senderCount !== 1) {
-    return fail("exactly one voting address must spend the credential");
+    return fail("exatamente um endereço de votação deve gastar a credencial");
   }
 
   if (sent !== REQUIRED_AMOUNT) {
-    return fail("transaction must spend exactly one voting token");
+    return fail("a transação deve gastar exatamente um token de votação");
   }
 
   if (burned !== REQUIRED_AMOUNT) {
-    return fail("transaction must burn exactly one voting token");
+    return fail("a transação deve queimar exatamente um token de votação");
   }
 }

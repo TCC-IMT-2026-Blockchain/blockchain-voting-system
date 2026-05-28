@@ -1,0 +1,16 @@
+{
+  "name": "votify-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Simple voting interface for the Votify TCC demo.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^7.3.0"
+  }
+}

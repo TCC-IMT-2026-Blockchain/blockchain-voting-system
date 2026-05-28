@@ -35,10 +35,31 @@ BALLOT_STREAM = "urna"
 URNA_STREAM_FILTER = "votify_urna_schema_v1"
 VOTE_TX_FILTER = "votify_vote_tx_v3"
 LEGACY_TX_FILTERS = ["votify_vote_tx_v1", "votify_vote_tx_v2"]
+FILTER_RUNTIME_TIMEOUT_MS = 200
 
 
 class VotifyError(RuntimeError):
     pass
+
+
+def translate_argparse_error(message: str) -> str:
+    replacements = [
+        ("the following arguments are required:", "os seguintes argumentos são obrigatórios:"),
+        ("invalid choice:", "opção inválida:"),
+        ("choose from", "escolha entre"),
+        ("unrecognized arguments:", "argumentos não reconhecidos:"),
+        ("expected one argument", "esperava um argumento"),
+    ]
+    translated = message
+    for source, target in replacements:
+        translated = translated.replace(source, target)
+    return translated
+
+
+class PortugueseArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: erro: {translate_argparse_error(message)}\n")
 
 
 def compact_json(value: Any) -> str:
@@ -69,7 +90,7 @@ def run_process(args: list[str], cwd: Path | None = None, check: bool = True) ->
     if check and completed.returncode != 0:
         command = " ".join(args)
         raise VotifyError(
-            f"Command failed ({completed.returncode}): {command}\n"
+            f"Comando falhou ({completed.returncode}): {command}\n"
             f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
         )
 
@@ -95,10 +116,10 @@ class MultiChain:
 def first_address_with_permission(mc: MultiChain, permission: str) -> str:
     rows = mc.cli(["listpermissions", permission])
     if not rows:
-        raise VotifyError(f"No address has the '{permission}' permission")
+        raise VotifyError(f"Nenhum endereço possui a permissão '{permission}'")
     address = rows[0].get("address")
     if not address:
-        raise VotifyError(f"Unexpected listpermissions {permission} result: {rows}")
+        raise VotifyError(f"Resultado inesperado em listpermissions {permission}: {rows}")
     return address
 
 
@@ -121,13 +142,28 @@ def filter_exists(mc: MultiChain, command: str, name: str) -> bool:
     return bool(list_by_name(mc, command, name))
 
 
+def configure_filter_runtime(mc: MultiChain) -> None:
+    containers = [mc.master]
+    if mc.slave:
+        containers.append(mc.slave)
+
+    for container in containers:
+        for param in ("sendfiltertimeout", "acceptfiltertimeout"):
+            mc.cli(
+                ["setruntimeparam", param, str(FILTER_RUNTIME_TIMEOUT_MS)],
+                container=container,
+                check=False,
+            )
+    print(f"filter runtime timeout configured: {FILTER_RUNTIME_TIMEOUT_MS} ms")
+
+
 def wait_until(label: str, predicate, timeout_seconds: int = 75) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         if predicate():
             return
         time.sleep(3)
-    raise VotifyError(f"Timed out waiting for {label}")
+    raise VotifyError(f"Tempo limite excedido ao aguardar {label}")
 
 
 def ensure_stream(mc: MultiChain, name: str, open_to_all_writers: bool = False) -> None:
@@ -165,7 +201,7 @@ def get_burn_address(mc: MultiChain) -> str:
     info = mc.cli(["getinfo"])
     burn = info.get("burnaddress") if isinstance(info, dict) else None
     if not burn:
-        raise VotifyError("Could not read burnaddress from getinfo")
+        raise VotifyError("Não foi possível ler o endereço de queima em getinfo")
     return burn
 
 
@@ -284,13 +320,13 @@ def wait_for_node(mc: MultiChain, timeout_seconds: int = 60) -> None:
         except Exception as exc:  # noqa: BLE001 - used for polling readiness
             last_error = str(exc)
         time.sleep(2)
-    raise VotifyError(f"MultiChain node did not become ready: {last_error}")
+    raise VotifyError(f"O nó MultiChain não ficou pronto: {last_error}")
 
 
 def normalize_cpf(cpf: str) -> str:
     digits = "".join(ch for ch in cpf if ch.isdigit())
     if len(digits) != 11:
-        raise VotifyError("CPF must contain exactly 11 digits after normalization")
+        raise VotifyError("O CPF deve conter exatamente 11 dígitos após a normalização")
     return digits
 
 
@@ -331,7 +367,7 @@ def issue_credential(
 ) -> dict[str, Any]:
     if credential_already_issued(mc, election_id, voter_id_hash) and not force:
         raise VotifyError(
-            f"Credential already issued for election={election_id} voter={voter_id_hash}"
+            f"Credencial já emitida para election={election_id} voter={voter_id_hash}"
         )
 
     admin = first_address_with_permission(mc, "admin")
@@ -417,9 +453,9 @@ def build_receipt(
             return {
                 "status": "pending_stream_index",
                 "txid": txid,
-                "message": "Transaction sent; stream item is not indexed yet.",
+                "message": "Transação enviada; o item da stream ainda não foi indexado.",
             }
-        raise VotifyError(f"No urna stream item found for txid={txid}")
+        raise VotifyError(f"Nenhum item da stream urna foi encontrado para txid={txid}")
 
     item = items[0]
     blockhash = item.get("blockhash")
@@ -488,7 +524,12 @@ def audit(mc: MultiChain, election_id: str | None, asset: str) -> dict[str, Any]
     if not isinstance(credentials, list):
         credentials = []
 
+    identities = mc.cli(["liststreamitems", IDENTITIES_STREAM, "true", "100000", "0"], check=False)
+    if not isinstance(identities, list):
+        identities = []
+
     filtered_votes = []
+    recent_votes = []
     counts: Counter[str] = Counter()
     min_confirmations = None
     tokens_burned_by_vote_transactions = 0.0
@@ -510,6 +551,26 @@ def audit(mc: MultiChain, election_id: str | None, asset: str) -> dict[str, Any]
                 mc, txid, burn_address, asset
             )
 
+        blockhash = item.get("blockhash")
+        blockheight = None
+        if blockhash:
+            block = mc.cli(["getblock", blockhash], check=False)
+            if isinstance(block, dict):
+                blockheight = block.get("height")
+
+        vout = item.get("vout")
+        stream_item_id = f"{txid}:{vout}"
+        receipt_hash_source = f"{txid}|{blockhash or 'pending'}|{stream_item_id}"
+        recent_votes.append(
+            {
+                "txid": txid,
+                "choice": str(payload.get("choice")),
+                "blockheight": blockheight,
+                "confirmations": item.get("confirmations", 0),
+                "receipt_hash": hashlib.sha256(receipt_hash_source.encode("utf-8")).hexdigest(),
+            }
+        )
+
     filtered_credentials = []
     for item in credentials:
         payload = data_json(item)
@@ -518,6 +579,15 @@ def audit(mc: MultiChain, election_id: str | None, asset: str) -> dict[str, Any]
         if election_id and payload.get("election_id") != election_id:
             continue
         filtered_credentials.append(item)
+
+    filtered_identities = []
+    for item in identities:
+        payload = data_json(item)
+        if not payload:
+            continue
+        if election_id and payload.get("election_id") != election_id:
+            continue
+        filtered_identities.append(item)
 
     asset_info = list_by_name(mc, "listassets", asset)
     chain_height = info.get("blocks") if isinstance(info, dict) else None
@@ -531,9 +601,11 @@ def audit(mc: MultiChain, election_id: str | None, asset: str) -> dict[str, Any]
         "tokens_burned_by_vote_transactions": tokens_burned_by_vote_transactions,
         "votes_total": len(filtered_votes),
         "votes_by_choice": dict(sorted(counts.items())),
+        "identities_registered": len(filtered_identities),
         "credentials_issued": len(filtered_credentials),
         "votes_match_burned_tokens": tokens_burned_by_vote_transactions == len(filtered_votes),
         "min_vote_confirmations": min_confirmations,
+        "recent_votes": recent_votes[-10:],
         "asset_info": asset_info[0] if asset_info else None,
     }
     return report
@@ -550,12 +622,14 @@ def cmd_up(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave)
     mc.compose(["up", "-d", "--build"])
     wait_for_node(mc, args.timeout)
+    configure_filter_runtime(mc)
     print("network is up")
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave)
     wait_for_node(mc, args.timeout)
+    configure_filter_runtime(mc)
 
     ensure_stream(mc, IDENTITIES_STREAM, open_to_all_writers=False)
     ensure_stream(mc, CREDENTIALS_STREAM, open_to_all_writers=False)
@@ -647,7 +721,7 @@ def cmd_authorize_slave(args: argparse.Namespace) -> None:
     logs_text = logs if isinstance(logs, str) else json.dumps(logs)
     match = re.search(r"grant\s+([A-Za-z0-9]+)\s+connect(?:,send,receive)?", logs_text)
     if not match:
-        raise VotifyError(f"Could not find pending slave address in docker logs for {args.slave}")
+        raise VotifyError(f"Não foi possível encontrar o endereço pendente do nó fiscal nos logs do Docker para {args.slave}")
 
     address = match.group(1)
     grant_global(mc, address, "connect,send,receive")
@@ -662,8 +736,8 @@ def add_common(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Votify MultiChain automation")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = PortugueseArgumentParser(description="Automação MultiChain do Votify")
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=PortugueseArgumentParser)
 
     up = sub.add_parser("up", help="build and start the Docker MultiChain network")
     add_common(up)
@@ -742,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
         args.func(args)
         return 0
     except VotifyError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERRO: {exc}", file=sys.stderr)
         return 1
 
 

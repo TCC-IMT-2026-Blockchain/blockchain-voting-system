@@ -1,9 +1,6 @@
-import { createApp } from './app.js';
-import { env } from './config/env.js';
-
-const app = createApp();
+import { app } from "./app.js";
+import { env } from "./config/env.js";
 
 app.listen(env.port, () => {
-  console.log(`API listening on http://localhost:${env.port}`);
-  console.log(`Swagger UI available at http://localhost:${env.port}/docs`);
+  console.log(`Votify backend running at http://localhost:${env.port}${env.apiPrefix}`);
 });

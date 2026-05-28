@@ -1,0 +1,18 @@
+{
+  "elections": [
+    {
+      "id": "467770a2-a8e1-46f0-b106-5535c14a0180",
+      "chainElectionId": "BANCO_TRADICIONAL_001",
+      "title": "Votação",
+      "description": "Votação usada para demonstrar fragilidades de uma arquitetura centralizada.",
+      "status": "OPEN",
+      "startsAt": "2026-05-28T16:57:40.371Z",
+      "endsAt": "2026-06-04T16:57:40.372Z",
+      "candidates": [],
+      "createdAt": "2026-05-28T16:57:40.372Z",
+      "updatedAt": "2026-05-28T16:57:40.372Z"
+    }
+  ],
+  "voters": [],
+  "votes": []
+}
