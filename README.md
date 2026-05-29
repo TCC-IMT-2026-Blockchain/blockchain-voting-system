@@ -23,11 +23,20 @@ frontend    Urna oficial simples: configuração, voto e auditoria
 3. Cadastra o eleitor.
 4. A aplicação gera a chave pública e registra na blockchain o hash do CPF mais
    a chave pública.
-5. O eleitor acessa `/`, informa a chave privada simulada e vota.
-6. O backend emite a credencial por baixo, registra o voto e queima o token.
+5. O administrador clica em `Travar eleição`, emitindo as credenciais dos eleitores e revogando permissões críticas do Master.
+6. O eleitor acessa `/`, informa a chave privada simulada e vota usando a credencial já emitida.
 7. A tela `/auditoria` recalcula o resultado pela blockchain.
 
 ## Rodar
+
+Modo completo, reiniciando a demo do zero:
+
+```powershell
+.\start-demo.cmd
+```
+
+O travamento da eleição é feito pela tela `/configuracao`, depois de cadastrar
+eleitores e opções de voto.
 
 Subir blockchain:
 

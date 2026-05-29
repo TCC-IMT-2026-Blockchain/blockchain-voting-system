@@ -27,6 +27,8 @@ export interface Election {
   startsAt: string;
   endsAt: string;
   candidates: Candidate[];
+  governanceLockedAt?: string | null;
+  governanceLockResult?: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -47,6 +49,8 @@ export interface VoteReceipt {
   id: string;
   electionId: string;
   txid: string;
+  choice?: string | null;
+  voterAddress?: string | null;
   receiptHash?: string | null;
   status: string;
   blockheight?: number | null;

@@ -254,6 +254,38 @@ def ensure_admin_token_balance(mc: MultiChain, asset: str, minimum: int) -> None
     print(f"asset topped up: {asset} +{missing}")
 
 
+def lock_governance(mc: MultiChain, asset: str) -> dict[str, Any]:
+    admin = first_address_with_permission(mc, "admin")
+
+    grant_global(mc, admin, "connect,send,receive,mine")
+    grant_global(mc, get_burn_address(mc), "receive")
+
+    revoked_permission_groups = [
+        "admin,activate,create,issue",
+        f"{asset}.send",
+        f"{IDENTITIES_STREAM}.write,{CREDENTIALS_STREAM}.write,{BALLOT_STREAM}.write",
+    ]
+    for permissions in revoked_permission_groups:
+        mc.cli(["revoke", admin, permissions], check=False)
+
+    return {
+        "locked": True,
+        "former_admin_address": admin,
+        "revoked_permissions": [
+            "admin",
+            "activate",
+            "create",
+            "issue",
+            f"{asset}.send",
+            f"{IDENTITIES_STREAM}.write",
+            f"{CREDENTIALS_STREAM}.write",
+            f"{BALLOT_STREAM}.write",
+        ],
+        "kept_permissions": ["connect", "send", "receive", "mine"],
+        "asset": asset,
+    }
+
+
 def test_and_create_stream_filter(mc: MultiChain) -> None:
     code = (FILTERS_DIR / "urna_stream_filter.js").read_text(encoding="utf-8")
     mc.cli(["teststreamfilter", "{}", code])
@@ -371,19 +403,27 @@ def issue_credential(
         )
 
     admin = first_address_with_permission(mc, "admin")
+    token_txid = "existing_balance"
+
     if not voter_address:
         voter_address = mc.cli(["getnewaddress"])
+
+    if not isinstance(voter_address, str):
+        raise VotifyError(f"Endereço de votação inesperado: {voter_address}")
 
     grant_global(mc, voter_address, "send,receive")
     grant_asset_send(mc, voter_address, asset)
     grant_stream_write(mc, voter_address, BALLOT_STREAM)
-    ensure_admin_token_balance(mc, asset, 1)
+    if admin_asset_balance(mc, voter_address, asset) < 1:
+        ensure_admin_token_balance(mc, asset, 1)
+        token_txid = mc.cli(["sendassetfrom", admin, voter_address, asset, "1"])
 
-    token_txid = mc.cli(["sendassetfrom", admin, voter_address, asset, "1"])
     credential_payload = {
         "schema_version": 1,
         "election_id": election_id,
         "voter_id_hash": voter_id_hash,
+        "voter_address": voter_address,
+        "token_transfer_txid": token_txid,
         "credential_status": "issued",
     }
     key = f"credential:{election_id}:{voter_id_hash}"
@@ -707,6 +747,12 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(status, ensure_ascii=False, indent=2))
 
 
+def cmd_lock_governance(args: argparse.Namespace) -> None:
+    mc = MultiChain(args.chain, args.master, args.slave)
+    result = lock_governance(mc, args.asset)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def cmd_grant_address(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave)
     grant_global(mc, args.address, args.permissions)
@@ -794,6 +840,10 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="print chain status, streams, assets, filters and peers")
     add_common(status)
     status.set_defaults(func=cmd_status)
+
+    lock = sub.add_parser("lock-governance", help="revoke master governance permissions after setup")
+    add_common(lock)
+    lock.set_defaults(func=cmd_lock_governance)
 
     grant = sub.add_parser("grant-address", help="grant permissions to a blockchain address")
     add_common(grant)

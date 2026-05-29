@@ -1,18 +1,99 @@
 {
   "elections": [
     {
-      "id": "467770a2-a8e1-46f0-b106-5535c14a0180",
+      "id": "3f6be070-5412-490a-94e9-f8c8c537bd15",
       "chainElectionId": "BANCO_TRADICIONAL_001",
       "title": "Votação",
       "description": "Votação usada para demonstrar fragilidades de uma arquitetura centralizada.",
       "status": "OPEN",
-      "startsAt": "2026-05-28T16:57:40.371Z",
-      "endsAt": "2026-06-04T16:57:40.372Z",
-      "candidates": [],
-      "createdAt": "2026-05-28T16:57:40.372Z",
-      "updatedAt": "2026-05-28T16:57:40.372Z"
+      "startsAt": "2026-05-29T11:59:06.955Z",
+      "endsAt": "2026-06-05T11:59:06.955Z",
+      "candidates": [
+        {
+          "id": "c7f38091-ef48-46fc-bff8-874c334e2c2c",
+          "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+          "name": "Candidato 1",
+          "number": "1",
+          "description": null
+        },
+        {
+          "id": "4245b34f-972a-4f8b-84ba-23cb6f0a67b4",
+          "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+          "name": "Candidato 2",
+          "number": "2",
+          "description": null
+        }
+      ],
+      "createdAt": "2026-05-29T11:59:06.955Z",
+      "updatedAt": "2026-05-29T12:00:07.716Z"
     }
   ],
-  "voters": [],
-  "votes": []
+  "voters": [
+    {
+      "id": "63e88c00-e8cd-49a1-9389-3420e64ada0c",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "cpf": "564.268.658-21",
+      "publicKey": "pub_a1dd6837f284625bdb1cb68f1dbc85c5dc4d8b05bae24c94ed5f55c477326ea2",
+      "createdAt": "2026-05-29T11:59:54.843Z"
+    },
+    {
+      "id": "43e00adb-721d-4fbd-ba00-532227f1976e",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "cpf": "887.554.323-46",
+      "publicKey": "pub_759b87b87ba0c0c701d14eb2e6e31560929e93591537818856d079634ee1bb68",
+      "createdAt": "2026-05-29T11:59:56.427Z"
+    },
+    {
+      "id": "f031b15b-c6fb-471e-b2e8-00ce5573cba9",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "cpf": "720.584.530-80",
+      "publicKey": "pub_40f8d6d22b99ea3388538fd60bbf532256434b0eac401df1d9a2bdbb29354ae8",
+      "createdAt": "2026-05-29T11:59:57.244Z"
+    },
+    {
+      "id": "288161d7-0084-43b2-9675-eb82e01509c0",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "cpf": "377.102.613-62",
+      "publicKey": "pub_5e18d34a87ed6c9bea50e24d898c9c7b8c80ed8d3f0341b990e775be8f754441",
+      "createdAt": "2026-05-29T11:59:57.999Z"
+    }
+  ],
+  "votes": [
+    {
+      "id": "3c339e10-b52c-48a1-b862-668dd361a409",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "choice": "1",
+      "privateKeySimulation": "064",
+      "txid": "9dbf11a9dc224693ad39c4d9e44289c4",
+      "receiptHash": "063386041d13e2bf4679e1d0bc5d2397edcad5f3f98b9c0b2846edbf970e527c",
+      "createdAt": "2026-05-29T12:02:01.119Z"
+    },
+    {
+      "id": "c66a7f61-68c8-4270-ae84-0ecd2750837a",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "choice": "2",
+      "privateKeySimulation": "713",
+      "txid": "b0c1133a54304383a9e301ce502ef012",
+      "receiptHash": "2a677b20e75ab897c064d665e1528d6a0cbbb97c397bef64bc6caf550e16cb66",
+      "createdAt": "2026-05-29T12:02:07.175Z"
+    },
+    {
+      "id": "270a8c1a-53d5-4175-a59f-9186bb2226b4",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "choice": "1",
+      "privateKeySimulation": "978",
+      "txid": "e7d3d866decd4ca5ba7aa3c35b62c5c1",
+      "receiptHash": "1ec2bae24b5df40300cd0cac97620d51c16c14d93a6592fbdff88e7e005574d8",
+      "createdAt": "2026-05-29T12:02:13.136Z"
+    },
+    {
+      "id": "39a84d22-3d33-4b43-be8c-d5b509021183",
+      "electionId": "3f6be070-5412-490a-94e9-f8c8c537bd15",
+      "choice": "2",
+      "privateKeySimulation": "002",
+      "txid": "8dc5804a60fc4f0791787a519395ce26",
+      "receiptHash": "cb686c7c8f2a5890bc8509b1884201ebeeb2d59dd87b0cb68b858404346257f0",
+      "createdAt": "2026-05-29T12:02:46.439Z"
+    }
+  ]
 }

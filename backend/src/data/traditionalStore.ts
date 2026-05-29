@@ -18,6 +18,8 @@ export interface TraditionalVote {
   id: string;
   electionId: string;
   choice: string;
+  voterId?: string;
+  publicKey?: string;
   privateKeySimulation: string | null;
   txid: string;
   receiptHash: string;

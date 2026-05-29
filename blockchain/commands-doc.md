@@ -39,6 +39,32 @@ Para remover também a imagem Docker local:
 python .\scripts\votify.py status
 ```
 
+## Travar governança após a preparação
+
+Depois de criar streams, asset, filtros, eleitores e credenciais, o nó
+administrador pode perder as permissões críticas de governança.
+
+```powershell
+python .\scripts\votify.py lock-governance
+```
+
+Permissões revogadas do antigo administrador:
+
+```text
+admin
+activate
+create
+issue
+VOTE_ELEICAO_001.send
+identidades.write
+credenciais_emitidas.write
+urna.write
+```
+
+O nó continua operando na rede, mas sem poder criar novos objetos, emitir mais
+tokens, cadastrar novas identidades, emitir novas credenciais ou publicar votos
+como administrador.
+
 ## Gerar hash protegido do CPF
 
 ```powershell

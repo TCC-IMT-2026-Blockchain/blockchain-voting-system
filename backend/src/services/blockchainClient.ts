@@ -135,5 +135,9 @@ export const blockchain = {
 
   status() {
     return runBlockchain(["status"]);
+  },
+
+  lockGovernance() {
+    return runBlockchain(["lock-governance"]) as Promise<unknown>;
   }
 };
