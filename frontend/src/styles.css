@@ -679,6 +679,15 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+strong.selectable {
+  user-select: all;
+  -webkit-user-select: all;
+  cursor: pointer;
+}
+strong.selectable:hover {
+  opacity: 0.8;
+}
+
 .key-box {
   border: 1px solid var(--line);
   border-radius: 8px;

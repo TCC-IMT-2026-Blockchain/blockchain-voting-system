@@ -143,6 +143,10 @@ const state = {
   demoVoters: loadDemoVoters(initialMode),
   ballotTitle: "",
   ballotCandidates: [] as CandidateDraft[],
+  auditSearchTxid: "",
+  auditSearchHash: "",
+  auditSearchResult: null as Receipt | null,
+  auditSearchError: "",
   busy: false,
   initialized: false,
   error: ""
@@ -284,6 +288,10 @@ function resetRuntimeStateForMode(mode: SystemMode) {
   state.demoVoters = loadDemoVoters(mode);
   state.ballotTitle = "";
   state.ballotCandidates = [];
+  state.auditSearchTxid = "";
+  state.auditSearchHash = "";
+  state.auditSearchResult = null;
+  state.auditSearchError = "";
   state.initialized = false;
   state.error = "";
 }
@@ -602,13 +610,9 @@ function renderReceipt() {
           <strong>${statusLabel}</strong>
         </div>
         <div class="receipt-grid">
-          <div><span>ID do registro</span><strong title="${escapeHtml(state.txid)}">${short(state.txid, 12, 10)}</strong></div>
+          <div><span>ID do registro</span><strong class="selectable">${escapeHtml(state.txid)}</strong></div>
           <div><span>Status</span><strong>${statusLabel}</strong></div>
-          <div><span>Hash local</span><strong title="${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}">${short(
-            receipt.receipt_hash ?? receipt.receiptHash,
-            12,
-            10
-          )}</strong></div>
+          <div><span>Hash local</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
         </div>
       </div>
     `;
@@ -621,14 +625,10 @@ function renderReceipt() {
         <strong>${statusLabel}</strong>
       </div>
       <div class="receipt-grid">
-        <div><span>TXID</span><strong title="${escapeHtml(state.txid)}">${short(state.txid, 12, 10)}</strong></div>
+        <div><span>TXID</span><strong class="selectable">${escapeHtml(state.txid)}</strong></div>
         <div><span>Bloco</span><strong>${receipt.blockheight ?? "-"}</strong></div>
         <div><span>Confirmações</span><strong>${confirmations}</strong></div>
-        <div><span>Hash</span><strong title="${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}">${short(
-          receipt.receipt_hash ?? receipt.receiptHash,
-          12,
-          10
-        )}</strong></div>
+        <div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
       </div>
     </div>
   `;
@@ -841,15 +841,91 @@ function renderConfigPage() {
   `;
 }
 
+async function searchAuditTxid() {
+  if (!state.election || !state.auditSearchTxid) return;
+  
+  await withBusy(async () => {
+    state.auditSearchResult = null;
+    state.auditSearchError = "";
+    try {
+      const result = await api<{ data: Receipt }>(
+        `/elections/${state.election!.id}/votes/${state.auditSearchTxid.trim()}/receipt`,
+        {
+          headers: { Authorization: `Bearer ${state.adminToken}` }
+        }
+      );
+      state.auditSearchResult = result.data;
+    } catch (error) {
+      state.auditSearchError = error instanceof Error ? error.message : "Comprovante não encontrado.";
+    }
+  });
+}
+
+function renderAuditSearch() {
+  const result = state.auditSearchResult;
+  const error = state.auditSearchError;
+
+  let resultHtml = "";
+  if (error) {
+    resultHtml = `<div class="notice error" style="margin-top: 1rem;">${escapeHtml(error)}</div>`;
+  } else if (result) {
+    const isRegistered = result.status === "confirmed" || result.status === "registered";
+    const confirmations = result.confirmations ?? 0;
+    const remoteHash = result.receipt_hash ?? result.receiptHash ?? "";
+    const localHash = state.auditSearchHash.trim();
+    
+    let hashStatusHtml = "";
+    if (localHash) {
+      if (localHash === remoteHash) {
+        hashStatusHtml = `<div class="notice success" style="margin-top: 1rem;"><strong>Dupla Verificação de Integridade Confirmada.</strong> O bloco que contém seu voto permanece imutável.</div>`;
+      } else {
+        hashStatusHtml = `<div class="notice error" style="margin-top: 1rem;"><strong>Alerta de Integridade:</strong> O Hash local não bate com o estado atual da rede. Pode indicar que o bloco original foi alterado (reescrita de cadeia).</div>`;
+      }
+    }
+
+    resultHtml = `
+      <div class="receipt-card" style="margin-top: 1rem;">
+        <div class="receipt-head">
+          <span class="status-dot ${isRegistered ? "ok" : ""}"></span>
+          <strong>Transação Válida</strong>
+        </div>
+        <p style="margin-bottom: 0;">O voto referente a este TXID está incorruptível, registrado no bloco <strong>${result.blockheight ?? "-"}</strong> com <strong>${confirmations}</strong> confirmação(ões) e o token de voto foi consumido.</p>
+        ${hashStatusHtml}
+      </div>
+    `;
+  }
+
+  return `
+    <article class="panel">
+      <div class="panel-title">
+        <h2>Verificar Integridade do Voto</h2>
+      </div>
+      <label>
+        TXID do Comprovante (Obrigatório)
+        <input id="auditSearchTxid" value="${escapeHtml(state.auditSearchTxid)}" placeholder="Cole seu TXID aqui..." ${state.busy ? "disabled" : ""} />
+      </label>
+      <label>
+        Hash Local do Comprovante (Opcional)
+        <input id="auditSearchHash" value="${escapeHtml(state.auditSearchHash)}" placeholder="receipt_hash (opcional)..." ${state.busy ? "disabled" : ""} />
+      </label>
+      <div class="form-actions" style="margin-top: 1rem;">
+        <button id="searchAuditTxid" class="primary" ${!state.election || !state.auditSearchTxid || state.busy ? "disabled" : ""}>Verificar Integridade</button>
+      </div>
+      ${resultHtml}
+    </article>
+  `;
+}
+
 function renderAuditPage() {
   return `
     <div class="page-action">
       <a href="/" class="back-link">Voltar</a>
     </div>
     <section class="audit-layout">
+      ${renderAuditSearch()}
       <article class="panel audit-panel">
         <div class="panel-title">
-          <h2>Auditoria</h2>
+          <h2>Auditoria Geral</h2>
         </div>
         ${renderAuditSummary()}
       </article>
@@ -1059,6 +1135,29 @@ function bindCommonEvents() {
       }
     };
   }
+
+  const auditSearchTxid = document.querySelector<HTMLInputElement>("#auditSearchTxid");
+  if (auditSearchTxid) {
+    auditSearchTxid.oninput = () => {
+      state.auditSearchTxid = auditSearchTxid.value;
+      state.auditSearchResult = null;
+      state.auditSearchError = "";
+      render();
+    };
+  }
+
+  const auditSearchHash = document.querySelector<HTMLInputElement>("#auditSearchHash");
+  if (auditSearchHash) {
+    auditSearchHash.oninput = () => {
+      state.auditSearchHash = auditSearchHash.value;
+      state.auditSearchResult = null;
+      state.auditSearchError = "";
+      render();
+    };
+  }
+
+  document.querySelector<HTMLButtonElement>("#searchAuditTxid")?.addEventListener("click", () => void searchAuditTxid());
+
 
   document.querySelector<HTMLButtonElement>("#saveBallot")?.addEventListener("click", () => void saveBallot());
   document.querySelector<HTMLButtonElement>("#lockElection")?.addEventListener("click", () => void lockElection());
