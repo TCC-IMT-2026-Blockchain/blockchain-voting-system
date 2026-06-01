@@ -9,7 +9,6 @@ $Root = $PSScriptRoot
 $BlockchainDir = Join-Path $Root "blockchain"
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
-$LogDir = Join-Path $Root "logs"
 
 function Write-Step {
   param([string]$Message)
@@ -82,21 +81,15 @@ function Start-NpmApp {
   param(
     [string]$Name,
     [string]$Path,
-    [string[]]$Arguments,
-    [string]$LogPrefix
+    [string[]]$Arguments
   )
-
-  $stdout = Join-Path $LogDir "$LogPrefix.out.log"
-  $stderr = Join-Path $LogDir "$LogPrefix.err.log"
 
   Write-Host "Iniciando $Name"
   Start-Process `
     -FilePath "npm.cmd" `
     -ArgumentList $Arguments `
     -WorkingDirectory $Path `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $stdout `
-    -RedirectStandardError $stderr | Out-Null
+    -WindowStyle Hidden | Out-Null
 }
 
 Write-Host "Votify demo bootstrap" -ForegroundColor Yellow
@@ -107,8 +100,6 @@ Assert-Command "docker"
 Assert-Command "python"
 Assert-Command "node"
 Assert-Command "npm"
-
-New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 
 Write-Step "Parando servicos locais"
 Stop-Port 3333
@@ -159,8 +150,8 @@ try {
 }
 
 Write-Step "Iniciando aplicacoes"
-Start-NpmApp -Name "backend" -Path $BackendDir -Arguments @("run", "dev") -LogPrefix "backend"
-Start-NpmApp -Name "frontend" -Path $FrontendDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0") -LogPrefix "frontend"
+Start-NpmApp -Name "backend" -Path $BackendDir -Arguments @("run", "dev")
+Start-NpmApp -Name "frontend" -Path $FrontendDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0")
 
 Start-Sleep -Seconds 5
 
@@ -173,11 +164,5 @@ Write-Host "Auditoria:  http://localhost:5173/auditoria"
 Write-Host "Admin demo: http://localhost:5173/admin"
 Write-Host ""
 Write-Host "Depois de cadastrar eleitores e opcoes, use Config > Travar eleicao para revogar a governanca."
-Write-Host ""
-Write-Host "Logs:"
-Write-Host "  $LogDir\backend.out.log"
-Write-Host "  $LogDir\backend.err.log"
-Write-Host "  $LogDir\frontend.out.log"
-Write-Host "  $LogDir\frontend.err.log"
 Write-Host ""
 Write-Host "Pronto. Abra http://localhost:5173 no navegador." -ForegroundColor Green
