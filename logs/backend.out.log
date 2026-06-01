@@ -1,5 +1,0 @@
-
-> votify-backend@0.1.0 dev
-> tsx watch src/server.ts
-
-Votify backend running at http://localhost:3333/api/v1
