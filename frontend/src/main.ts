@@ -408,6 +408,10 @@ async function castVote() {
 
     state.txid = result.data.txid;
     state.receipt = result.data.receipt;
+    state.auditSearchTxid = "";
+    state.auditSearchHash = "";
+    state.auditSearchResult = null;
+    state.auditSearchError = "";
     await refreshAuditAndStatus();
   });
 }
@@ -424,10 +428,10 @@ async function refreshReceipt() {
   state.receipt = result.data;
 }
 
-async function refreshAuditAndStatus() {
+async function refreshAuditAndStatus(visual = false) {
   if (!state.election || !state.adminToken) return;
 
-  const audit = await api<{ data: AuditReport }>(`/elections/${state.election.id}/audit`, {
+  const audit = await api<{ data: AuditReport }>(`/elections/${state.election.id}/audit${visual ? "?visual=1" : ""}`, {
     headers: { Authorization: `Bearer ${state.adminToken}` }
   });
   state.audit = audit.data;
@@ -438,7 +442,7 @@ async function refreshRouteData() {
   if (!state.initialized) return;
   if (currentRoute === "auditoria" || currentRoute === "admin") {
     try {
-      await refreshAuditAndStatus();
+      await refreshAuditAndStatus(currentRoute === "auditoria");
       normalizeAttackChoices();
       render();
     } catch (error) {
@@ -508,6 +512,10 @@ function clearVoteForm() {
   state.votePrivateKey = "";
   state.txid = "";
   state.receipt = null;
+  state.auditSearchTxid = "";
+  state.auditSearchHash = "";
+  state.auditSearchResult = null;
+  state.auditSearchError = "";
   state.error = "";
   render();
 }
@@ -708,36 +716,6 @@ function renderAuditSummary() {
   `;
 }
 
-function renderVotePage() {
-  return `
-    <section class="single">
-      <article class="panel">
-        <div class="panel-title">
-          <h2>Voto</h2>
-        </div>
-        <label>
-          Chave Privada
-          <input id="votePrivateKey" value="${escapeHtml(state.votePrivateKey)}" />
-        </label>
-        <div class="candidates">
-          ${renderCandidates()}
-        </div>
-        <div class="vote-actions">
-          <button id="clearVote" class="secondary" ${state.busy ? "disabled" : ""}>Limpar</button>
-          <button id="castVote" class="primary" ${!state.election || !state.selectedChoice || state.busy ? "disabled" : ""}>Votar</button>
-        </div>
-      </article>
-
-      <article class="panel">
-        <div class="panel-title">
-          <h2>${state.mode === "votifalho" ? "Protocolo" : "Comprovante"}</h2>
-        </div>
-        ${renderReceipt()}
-      </article>
-    </section>
-  `;
-}
-
 function renderCandidateEditor() {
   const locked = isElectionLocked();
   return `
@@ -849,7 +827,7 @@ async function searchAuditTxid() {
     state.auditSearchError = "";
     try {
       const result = await api<{ data: Receipt }>(
-        `/elections/${state.election!.id}/votes/${state.auditSearchTxid.trim()}/receipt`,
+        `/elections/${state.election!.id}/votes/${state.auditSearchTxid.trim()}/receipt?visual=1`,
         {
           headers: { Authorization: `Bearer ${state.adminToken}` }
         }
@@ -916,13 +894,97 @@ function renderAuditSearch() {
   `;
 }
 
+function renderVoteIntegrityWidget() {
+  const result = state.auditSearchResult;
+  const error = state.auditSearchError;
+
+  let resultHtml = "";
+  if (error) {
+    resultHtml = `<div class="notice error integrity-notice">${escapeHtml(error)}</div>`;
+  } else if (result) {
+    const isRegistered = result.status === "confirmed" || result.status === "registered";
+    const confirmations = result.confirmations ?? 0;
+    const remoteHash = result.receipt_hash ?? result.receiptHash ?? "";
+    const localHash = state.auditSearchHash.trim();
+
+    let hashStatusHtml = "";
+    if (localHash) {
+      hashStatusHtml =
+        localHash === remoteHash
+          ? `<div class="notice success integrity-notice"><strong>Hash confirmado.</strong> O comprovante informado corresponde ao estado atual da blockchain.</div>`
+          : `<div class="notice error integrity-notice"><strong>Hash divergente.</strong> O comprovante informado não corresponde ao estado atual da blockchain.</div>`;
+    }
+
+    resultHtml = `
+      <div class="receipt-card integrity-result">
+        <div class="receipt-head">
+          <span class="status-dot ${isRegistered ? "ok" : ""}"></span>
+          <strong>Comprovante encontrado</strong>
+        </div>
+        <p>A transação deste TXID está registrada no bloco <strong>${result.blockheight ?? "-"}</strong> com <strong>${confirmations}</strong> confirmação(ões).</p>
+        ${hashStatusHtml}
+      </div>
+    `;
+  }
+
+  return `
+    <article class="panel vote-integrity-panel">
+      <div class="panel-title">
+        <h2>Verificar voto</h2>
+      </div>
+      <label>
+        TXID do comprovante
+        <input id="auditSearchTxid" value="${escapeHtml(state.auditSearchTxid)}" ${state.busy ? "disabled" : ""} />
+      </label>
+      <label>
+        Hash do comprovante
+        <input id="auditSearchHash" value="${escapeHtml(state.auditSearchHash)}" ${state.busy ? "disabled" : ""} />
+      </label>
+      <div class="integrity-actions">
+        <button id="searchAuditTxid" class="primary" ${!state.election || !state.auditSearchTxid || state.busy ? "disabled" : ""}>Verificar</button>
+      </div>
+      ${resultHtml}
+    </article>
+  `;
+}
+
+function renderVotePage() {
+  return `
+    <section class="single">
+      <article class="panel">
+        <div class="panel-title">
+          <h2>Voto</h2>
+        </div>
+        <label>
+          Chave Privada
+          <input id="votePrivateKey" value="${escapeHtml(state.votePrivateKey)}" />
+        </label>
+        <div class="candidates">
+          ${renderCandidates()}
+        </div>
+        <div class="vote-actions">
+          <button id="clearVote" class="secondary" ${state.busy ? "disabled" : ""}>Limpar</button>
+          <button id="castVote" class="primary" ${!state.election || !state.selectedChoice || state.busy ? "disabled" : ""}>Votar</button>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-title">
+          <h2>${state.mode === "votifalho" ? "Protocolo" : "Comprovante"}</h2>
+        </div>
+        ${renderReceipt()}
+      </article>
+    </section>
+    ${state.mode === "votify" ? `<section class="integrity-layout">${renderVoteIntegrityWidget()}</section>` : ""}
+  `;
+}
+
 function renderAuditPage() {
   return `
     <div class="page-action">
       <a href="/" class="back-link">Voltar</a>
     </div>
     <section class="audit-layout">
-      ${renderAuditSearch()}
       <article class="panel audit-panel">
         <div class="panel-title">
           <h2>Auditoria Geral</h2>

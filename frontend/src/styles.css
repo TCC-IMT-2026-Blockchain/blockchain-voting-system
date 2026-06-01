@@ -257,10 +257,20 @@ h3 {
   color: var(--danger);
 }
 
+.notice.success {
+  border-color: var(--ink);
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
 .single {
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.52fr);
+}
+
+.integrity-layout {
+  margin-top: 20px;
 }
 
 .config-layout {
@@ -420,6 +430,16 @@ h3 {
 .vote-actions .secondary {
   margin: 0;
   width: 100%;
+}
+
+.integrity-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.integrity-actions .primary {
+  min-width: 180px;
 }
 
 .lock-row {
@@ -677,6 +697,20 @@ h3 {
 .receipt-grid strong,
 .key-box strong {
   overflow-wrap: anywhere;
+}
+
+.integrity-result {
+  margin-top: 18px;
+}
+
+.integrity-result p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 12px 0 0;
+}
+
+.integrity-notice {
+  margin-top: 12px;
 }
 
 strong.selectable {

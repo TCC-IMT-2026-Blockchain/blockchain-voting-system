@@ -9,6 +9,7 @@ $Root = $PSScriptRoot
 $BlockchainDir = Join-Path $Root "blockchain"
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
+$VisualizerDir = Join-Path $Root "visualizer"
 
 function Write-Step {
   param([string]$Message)
@@ -104,6 +105,7 @@ Assert-Command "npm"
 Write-Step "Parando servicos locais"
 Stop-Port 3333
 Stop-Port 5173
+Stop-Port 5174
 
 Write-Step "Parando containers MultiChain"
 Push-Location $BlockchainDir
@@ -149,9 +151,19 @@ try {
   Pop-Location
 }
 
+Write-Step "Preparando visualizador"
+Ensure-Dependencies $VisualizerDir
+Push-Location $VisualizerDir
+try {
+  npm run build
+} finally {
+  Pop-Location
+}
+
 Write-Step "Iniciando aplicacoes"
 Start-NpmApp -Name "backend" -Path $BackendDir -Arguments @("run", "dev")
 Start-NpmApp -Name "frontend" -Path $FrontendDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0")
+Start-NpmApp -Name "visualizador" -Path $VisualizerDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0", "--port", "5174")
 
 Start-Sleep -Seconds 5
 
@@ -159,6 +171,7 @@ Write-Step "Resumo"
 Write-Host "Blockchain: containers votify-master e votify-slave"
 Write-Host "Backend:    http://localhost:3333/api/v1"
 Write-Host "Frontend:   http://localhost:5173"
+Write-Host "Visual:     http://localhost:5174"
 Write-Host "Config:     http://localhost:5173/configuracao"
 Write-Host "Auditoria:  http://localhost:5173/auditoria"
 Write-Host "Admin demo: http://localhost:5173/admin"

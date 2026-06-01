@@ -14,6 +14,7 @@ votação e permitir auditoria independente por qualquer nó participante.
 blockchain  Camada MultiChain, scripts, streams, assets, filtros e auditoria
 backend     API de integração entre aplicação, demonstração e blockchain
 frontend    Urna oficial simples: configuração, voto e auditoria
+visualizer  Tela didática independente que anima os bastidores do sistema
 ```
 
 ## Fluxo Atual
@@ -62,10 +63,19 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
+Subir visualizador didático:
+
+```powershell
+cd visualizer
+npm install
+npm run dev -- --host 0.0.0.0 --port 5174
+```
+
 URLs principais:
 
 ```text
 Urna oficial: http://localhost:5173
+Visualizador: http://localhost:5174
 Backend:      http://localhost:3333/api/v1
 ```
 

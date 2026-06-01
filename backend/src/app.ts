@@ -7,6 +7,7 @@ import { env } from "./config/env.js";
 import { store } from "./data/store.js";
 import { traditionalStore } from "./data/traditionalStore.js";
 import { blockchain } from "./services/blockchainClient.js";
+import { visualEvents, type VisualEventType, type VisualSystem } from "./services/visualEvents.js";
 import { derivePublicKey, safePublicUser } from "./lib/crypto.js";
 import { HttpError, errorResponse } from "./lib/errors.js";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "./http/auth.js";
@@ -19,6 +20,14 @@ app.use(express.json({ limit: "1mb" }));
 
 const router = express.Router();
 const traditionalRouter = express.Router();
+
+function emitVisualEvent(type: VisualEventType, system: VisualSystem, metadata?: Record<string, string | number | boolean | null>) {
+  visualEvents.publish({ type, system, metadata });
+}
+
+function visualErrorCode(error: unknown) {
+  return error instanceof HttpError ? error.code : "UNEXPECTED_ERROR";
+}
 
 function now() {
   return new Date().toISOString();
@@ -342,6 +351,10 @@ router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: now(), version: "0.1.0" });
 });
 
+router.get("/visual/events", (_req, res) => {
+  visualEvents.subscribe(res);
+});
+
 router.post("/auth/login", (req, res, next) => {
   try {
     const { email, password } = req.body ?? {};
@@ -446,6 +459,9 @@ traditionalRouter.put(
       election.candidates = normalizedCandidates;
       election.updatedAt = now();
       traditionalStore.save();
+      emitVisualEvent("ballot_saved", "votifalho", {
+        options: normalizedCandidates.length
+      });
 
       res.json({ data: election });
     } catch (error) {
@@ -476,6 +492,7 @@ traditionalRouter.post(
 
       traditionalStore.all().voters.push(voter);
       traditionalStore.save();
+      emitVisualEvent("voter_registration", "votifalho");
 
       res.status(201).json({
         data: {
@@ -540,6 +557,7 @@ traditionalRouter.post("/elections/:electionId/votes", requireAuth, (req, res, n
 
     traditionalStore.all().votes.push(vote);
     traditionalStore.save();
+    emitVisualEvent("vote_cast", "votifalho");
 
     res.status(201).json({
       data: {
@@ -555,6 +573,9 @@ traditionalRouter.post("/elections/:electionId/votes", requireAuth, (req, res, n
       }
     });
   } catch (error) {
+    emitVisualEvent("vote_rejected", "votifalho", {
+      reason: visualErrorCode(error)
+    });
     next(error);
   }
 });
@@ -614,6 +635,9 @@ traditionalRouter.post("/maintenance/change-vote", (req, res, next) => {
     vote.choice = toChoice;
     vote.receiptHash = fakeReceiptHash(vote.txid, vote.choice, vote.createdAt);
     traditionalStore.save();
+    emitVisualEvent("vote_change_attempt", "votifalho", {
+      accepted: true
+    });
 
     res.json({
       data: {
@@ -832,6 +856,9 @@ router.put("/admin/elections/:electionId/ballot", requireAuth, requireRole("ADMI
     election.candidates = normalizedCandidates;
     election.updatedAt = now();
     store.save();
+    emitVisualEvent("ballot_saved", "votify", {
+      options: normalizedCandidates.length
+    });
 
     res.json({ data: election });
   } catch (error) {
@@ -891,6 +918,7 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
 
     store.all().voters.push(voter);
     store.save();
+    emitVisualEvent("voter_registration", "votify");
     res.status(201).json({
       data: {
         id: voter.id,
@@ -905,9 +933,20 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
 });
 
 router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN"), async (req, res, next) => {
+  let failureWasPublished = false;
+
+  function publishLockFailure(reason: string) {
+    if (failureWasPublished) return;
+    failureWasPublished = true;
+    emitVisualEvent("election_lock_rejected", "votify", { reason });
+  }
+
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
     if (election.governanceLockedAt) {
+      emitVisualEvent("election_locked", "votify", {
+        alreadyLocked: true
+      });
       res.json({
         data: {
           election,
@@ -919,11 +958,13 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
     }
 
     if (election.candidates.length === 0) {
+      publishLockFailure("missing_options");
       throw new HttpError(400, "BALLOT_NOT_CONFIGURED", "Cadastre as opções de voto antes de travar a eleição.");
     }
 
     const voters = store.all().voters.filter((item) => item.electionId === election.id);
     if (voters.length === 0) {
+      publishLockFailure("missing_voters");
       throw new HttpError(400, "VOTERS_NOT_CONFIGURED", "Cadastre pelo menos um eleitor antes de travar a eleição.");
     }
 
@@ -948,6 +989,10 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
     election.governanceLockResult = governance;
     election.updatedAt = now();
     store.save();
+    emitVisualEvent("election_locked", "votify", {
+      credentials: issuedCredentials.length,
+      voters: voters.length
+    });
 
     res.json({
       data: {
@@ -957,6 +1002,7 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
       }
     });
   } catch (error) {
+    publishLockFailure("lock_failed");
     next(error);
   }
 });
@@ -1064,6 +1110,7 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
 
     store.all().receipts.push(receipt);
     store.save();
+    emitVisualEvent("vote_cast", "votify");
 
     res.status(201).json({
       data: {
@@ -1076,6 +1123,9 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
       }
     });
   } catch (error) {
+    emitVisualEvent("vote_rejected", "votify", {
+      reason: visualErrorCode(error)
+    });
     next(error);
   }
 });
@@ -1084,6 +1134,9 @@ router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
     const receipt = await blockchain.receipt(election.chainElectionId, routeParam(req.params.txid, "txid"));
+    if (req.query.visual === "1") {
+      emitVisualEvent("receipt_verified", "votify");
+    }
     res.json({ data: receipt });
   } catch (error) {
     next(error);
@@ -1094,6 +1147,9 @@ router.get("/elections/:electionId/audit", requireAuth, requireRole("ADMIN", "AU
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
     const audit = await blockchain.audit(election.chainElectionId);
+    if (req.query.visual === "1") {
+      emitVisualEvent("audit_recalculated", "votify");
+    }
     res.json({ data: audit });
   } catch (error) {
     next(error);
@@ -1139,9 +1195,12 @@ router.post("/maintenance/change-vote", async (req, res, next) => {
         }
       });
     } catch (error) {
-      const after = await blockchain.audit(election.chainElectionId);
-      res.json({
-        data: {
+    const after = await blockchain.audit(election.chainElectionId);
+    emitVisualEvent("vote_change_attempt", "votify", {
+      accepted: false
+    });
+    res.json({
+      data: {
           system: "votify",
           attack: "change_vote",
           status: "blocked",

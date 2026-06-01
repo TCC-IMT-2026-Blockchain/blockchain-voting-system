@@ -1,0 +1,342 @@
+:root {
+  --ink: #050505;
+  --muted: #68645b;
+  --line: #ded9ca;
+  --paper: #fffef9;
+  --page: #f7f5ec;
+  --soft: #f0ecdc;
+  --accent: #fdd302;
+  --accent-soft: #fff7bf;
+  --danger: #7a251d;
+  --danger-soft: #f4dfd8;
+  color: var(--ink);
+  background: var(--page);
+  font-family:
+    Arial, Helvetica, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--page);
+}
+
+svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.shell {
+  margin: 0 auto;
+  max-width: 1180px;
+  min-height: 100vh;
+  padding: 28px 22px 44px;
+}
+
+.shell.system-failure {
+  --accent: #b91c1c;
+  --accent-soft: #f7dede;
+  --danger: #7f1d1d;
+  --danger-soft: #f6dada;
+  --line: #e1caca;
+  --soft: #f3e8e8;
+}
+
+.topbar {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin-bottom: 26px;
+  padding-bottom: 18px;
+}
+
+.brand-block {
+  display: inline-flex;
+  line-height: 0;
+  min-width: 0;
+}
+
+.brand-block img {
+  display: block;
+  height: auto;
+  width: 168px;
+}
+
+h2 {
+  margin: 0;
+}
+
+.connection {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--ink);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 9px;
+  min-height: 30px;
+  padding: 6px 12px;
+}
+
+.connection b {
+  background: var(--accent);
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  display: block;
+  height: 10px;
+  width: 10px;
+}
+
+.connection.offline b {
+  background: var(--danger);
+}
+
+.connection.connecting b {
+  animation: blink 0.9s infinite alternate;
+}
+
+.stage {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.flow-card,
+.feed {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.flow-card {
+  min-height: 520px;
+  padding: 22px;
+}
+
+.flow-head {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+}
+
+.flow-head h2,
+.feed h2 {
+  color: var(--ink);
+  font-size: 22px;
+}
+
+.feed h2 {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.flow-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.flow-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  min-height: 150px;
+  overflow: hidden;
+  padding: 14px;
+  position: relative;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease,
+    opacity 160ms ease;
+}
+
+.flow-step::before {
+  background: linear-gradient(90deg, transparent, rgba(5, 5, 5, 0.08), transparent);
+  content: "";
+  height: 100%;
+  left: -80%;
+  opacity: 0;
+  position: absolute;
+  top: 0;
+  transform: skewX(-20deg);
+  width: 55%;
+}
+
+.flow-step.active {
+  border-color: var(--ink);
+  background: var(--accent-soft);
+  box-shadow: inset 5px 0 0 var(--accent);
+  transform: translateY(-2px);
+}
+
+.system-failure .flow-step.active {
+  background: var(--danger-soft);
+  box-shadow: inset 5px 0 0 var(--accent);
+}
+
+.flow-step.active::before {
+  animation: sweep 0.95s ease;
+  opacity: 1;
+}
+
+.flow-step.done {
+  border-color: var(--ink);
+}
+
+.flow-step.error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  box-shadow: inset 5px 0 0 var(--danger);
+}
+
+.flow-step.error .step-icon {
+  background: var(--danger);
+  color: #fffef9;
+}
+
+.step-icon {
+  align-items: center;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  color: var(--ink);
+  display: flex;
+  height: 54px;
+  justify-content: center;
+  margin-bottom: 16px;
+  width: 54px;
+}
+
+.flow-step.active .step-icon,
+.system-failure .flow-step.active .step-icon {
+  background: var(--accent);
+}
+
+.step-icon svg {
+  height: 30px;
+  width: 30px;
+}
+
+.flow-step strong {
+  color: var(--ink);
+  display: block;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.flow-step span {
+  color: var(--muted);
+  display: block;
+  font-size: 14px;
+  line-height: 1.35;
+  margin-top: 7px;
+}
+
+.feed-item span,
+.feed-item small {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.feed {
+  max-height: calc(100vh - 150px);
+  overflow: hidden;
+  padding: 18px;
+}
+
+.feed-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  margin-bottom: 10px;
+  padding: 12px;
+}
+
+.feed-item strong {
+  color: var(--ink);
+  display: block;
+  font-size: 15px;
+  margin: 4px 0;
+}
+
+.feed-item.failure {
+  background: var(--danger-soft);
+}
+
+.empty-feed {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  line-height: 1.4;
+  min-height: 94px;
+  padding: 16px;
+}
+
+@keyframes sweep {
+  from {
+    left: -80%;
+  }
+
+  to {
+    left: 125%;
+  }
+}
+
+@keyframes blink {
+  from {
+    opacity: 0.35;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1050px) {
+  .topbar,
+  .brand-block {
+    align-items: flex-start;
+  }
+
+  .stage {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .feed {
+    max-height: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .shell {
+    padding: 20px 14px 32px;
+  }
+
+  .flow-grid {
+    grid-template-columns: 1fr;
+  }
+}

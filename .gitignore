@@ -1,1 +1,3 @@
 /logs/
+/visualizer/node_modules/
+/visualizer/dist/
