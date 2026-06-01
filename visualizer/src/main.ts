@@ -369,7 +369,6 @@ async function playNext() {
   if (!event) {
     isPlaying = false;
     activeStep = -1;
-    completedSteps = currentEvent ? currentFlow.steps.length : 0;
     render();
     return;
   }
@@ -377,11 +376,15 @@ async function playNext() {
   isPlaying = true;
   currentEvent = event;
   currentFlow = flowForEvent(event);
+  const lastAnimatedStep =
+    isFailureEvent(event) && typeof currentFlow.failureStepIndex === "number"
+      ? currentFlow.failureStepIndex
+      : currentFlow.steps.length - 1;
   activeStep = 0;
   completedSteps = 0;
   render();
 
-  for (let index = 0; index < currentFlow.steps.length; index += 1) {
+  for (let index = 0; index <= lastAnimatedStep; index += 1) {
     activeStep = index;
     completedSteps = index;
     render();
@@ -392,7 +395,7 @@ async function playNext() {
   }
 
   activeStep = -1;
-  completedSteps = currentFlow.steps.length;
+  completedSteps = lastAnimatedStep + 1;
   render();
   await delay(900);
   await playNext();
