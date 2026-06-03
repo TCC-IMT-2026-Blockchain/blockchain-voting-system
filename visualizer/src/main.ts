@@ -335,10 +335,7 @@ function render() {
         <div class="brand-block">
           <img src="${logoVotifyUrl}" alt="Votify" />
         </div>
-        <div class="connection ${connectionState}">
-          <b></b>
-          ${statusLabel()}
-        </div>
+       
       </header>
 
       <section class="stage">

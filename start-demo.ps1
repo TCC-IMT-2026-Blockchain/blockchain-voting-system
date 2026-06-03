@@ -178,4 +178,4 @@ Write-Host "Admin demo: http://localhost:5173/admin"
 Write-Host ""
 Write-Host "Depois de cadastrar eleitores e opcoes, use Config > Travar eleicao para revogar a governanca."
 Write-Host ""
-Write-Host "Pronto. Abra http://localhost:5173 no navegador." -ForegroundColor Green
+Write-Host "Pronto. Abra http://localhost:5173 e http://localhost:5174 no navegador." -ForegroundColor Green
