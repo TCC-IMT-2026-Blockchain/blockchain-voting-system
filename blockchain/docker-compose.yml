@@ -33,6 +33,23 @@ services:
       multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
       "
 
+  fiscal-2-node:
+    build: .
+    container_name: votify-fiscal-2
+    networks:
+      votify-net:
+        ipv4_address: 172.20.0.4
+    volumes:
+      - ./fiscal2-data:/root/.multichain
+    depends_on:
+      - master-node
+    restart: always
+    command: >
+      /bin/bash -c "
+      sleep 5 &&
+      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      "
+
 networks:
   votify-net:
     driver: bridge

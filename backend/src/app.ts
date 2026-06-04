@@ -22,6 +22,7 @@ const router = express.Router();
 const traditionalRouter = express.Router();
 
 function emitVisualEvent(type: VisualEventType, system: VisualSystem, metadata?: Record<string, string | number | boolean | null>) {
+  if (system !== "votify") return;
   visualEvents.publish({ type, system, metadata });
 }
 
@@ -59,8 +60,250 @@ function getTraditionalElectionOrThrow(id: string) {
   return election;
 }
 
+function getOrCreateTraditionalMirrorElection(sourceElection: ReturnType<typeof getElectionOrThrow>) {
+  const db = traditionalStore.all();
+  let election = db.elections[0];
+
+  if (!election) {
+    election = {
+      id: randomUUID(),
+      chainElectionId: "BANCO_TRADICIONAL_001",
+      title: sourceElection.title,
+      description: sourceElection.description,
+      status: sourceElection.status,
+      startsAt: sourceElection.startsAt,
+      endsAt: sourceElection.endsAt,
+      candidates: [],
+      createdAt: now(),
+      updatedAt: now()
+    };
+    db.elections.push(election);
+  }
+
+  return election;
+}
+
+function syncTraditionalElectionFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>) {
+  const mirror = getOrCreateTraditionalMirrorElection(sourceElection);
+
+  mirror.title = sourceElection.title;
+  mirror.description = sourceElection.description;
+  mirror.status = sourceElection.status;
+  mirror.startsAt = sourceElection.startsAt;
+  mirror.endsAt = sourceElection.endsAt;
+  mirror.updatedAt = now();
+  mirror.candidates = sourceElection.candidates.map((candidate) => {
+    const existing = mirror.candidates.find((item) => item.number === candidate.number);
+    return {
+      id: existing?.id ?? randomUUID(),
+      electionId: mirror.id,
+      name: candidate.name,
+      number: candidate.number,
+      description: candidate.description ?? null
+    };
+  });
+
+  traditionalStore.save();
+  return mirror;
+}
+
+function syncTraditionalVoterFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>, cpf: string, publicKey: string) {
+  const mirror = syncTraditionalElectionFromVotify(sourceElection);
+  const voters = traditionalStore.all().voters;
+  const existing = voters.find(
+    (item) => item.electionId === mirror.id && (item.publicKey === publicKey || item.cpf === cpf)
+  );
+
+  if (existing) {
+    existing.cpf = cpf;
+    existing.publicKey = publicKey;
+  } else {
+    voters.push({
+      id: randomUUID(),
+      electionId: mirror.id,
+      cpf,
+      publicKey,
+      createdAt: now()
+    });
+  }
+
+  traditionalStore.save();
+  return mirror;
+}
+
 function fakeReceiptHash(txid: string, choice: string, createdAt: string) {
   return createHash("sha256").update(`${txid}|${choice}|${createdAt}`).digest("hex");
+}
+
+type AuditNodeId = "master" | "fiscal-1" | "fiscal-2";
+
+type NodeCompromise = {
+  choice: string;
+  amount: number;
+  compromisedAt: string;
+};
+
+const auditNodes: Array<{
+  id: AuditNodeId;
+  name: string;
+  container: string;
+  role: "master" | "fiscal";
+}> = [
+  { id: "master", name: "Nó 1", container: "votify-master", role: "master" },
+  { id: "fiscal-1", name: "Nó 2", container: "votify-slave", role: "fiscal" },
+  { id: "fiscal-2", name: "Nó 3", container: "votify-fiscal-2", role: "fiscal" }
+];
+
+const compromisedAuditNodes = new Map<AuditNodeId, NodeCompromise>();
+
+function getAuditNodeOrThrow(id: string) {
+  const node = auditNodes.find((item) => item.id === id);
+  if (!node) {
+    throw new HttpError(404, "AUDIT_NODE_NOT_FOUND", "Nó de auditoria não encontrado.");
+  }
+  return node;
+}
+
+function ensureFiscalNode(id: string) {
+  const node = getAuditNodeOrThrow(id);
+  if (node.role !== "fiscal") {
+    throw new HttpError(400, "AUDIT_NODE_NOT_CONTROLLABLE", "A demonstração só controla nós fiscais.");
+  }
+  return node;
+}
+
+function sortRecord(record: Record<string, number> = {}) {
+  return Object.fromEntries(Object.entries(record).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function auditFingerprint(audit: any) {
+  return JSON.stringify({
+    votes_total: audit?.votes_total ?? 0,
+    votes_by_choice: sortRecord(audit?.votes_by_choice ?? {}),
+    tokens_burned_by_vote_transactions: audit?.tokens_burned_by_vote_transactions ?? 0,
+    credentials_issued: audit?.credentials_issued ?? 0
+  });
+}
+
+function defaultCompromiseChoice(election: { candidates: { number: string }[] }, audit: any) {
+  return election.candidates[0]?.number ?? Object.keys(audit?.votes_by_choice ?? {})[0] ?? "1";
+}
+
+function tamperAudit(election: { candidates: { number: string }[] }, audit: any, compromise: NodeCompromise) {
+  const forged = JSON.parse(JSON.stringify(audit ?? {}));
+  const choice = compromise.choice || defaultCompromiseChoice(election, audit);
+  const amount = Math.max(1, Math.trunc(compromise.amount || 10));
+  const votesByChoice = { ...(forged.votes_by_choice ?? {}) } as Record<string, number>;
+
+  votesByChoice[choice] = (Number(votesByChoice[choice]) || 0) + amount;
+  forged.votes_by_choice = sortRecord(votesByChoice);
+  forged.votes_total = (Number(forged.votes_total) || 0) + amount;
+  forged.votes_match_burned_tokens = false;
+  forged.compromised_report = true;
+  forged.compromise_note = `Relatório adulterado: +${amount} voto(s) na opção ${choice}.`;
+
+  return forged;
+}
+
+function normalizeAuditError(error: unknown) {
+  const raw = error instanceof HttpError
+    ? String(error.details ?? error.message ?? "")
+    : error instanceof Error
+      ? error.message
+      : String(error ?? "");
+  const lower = raw.toLowerCase();
+
+  if (lower.includes("is restarting") || lower.includes("wait until the container is running")) {
+    return "Nó inicializando. Aguarde alguns segundos.";
+  }
+
+  if (lower.includes("no such container")) {
+    return "Nó não encontrado. Reinicie a demonstração.";
+  }
+
+  if (error instanceof HttpError && error.code === "BLOCKCHAIN_COMMAND_FAILED") {
+    return "Nó offline ou sem resposta.";
+  }
+
+  if (error instanceof HttpError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return "Nó indisponível.";
+}
+
+function isMissingDockerContainer(error: unknown) {
+  if (!(error instanceof HttpError)) return false;
+  const details = String(error.details ?? error.message ?? "");
+  return details.includes("No such container");
+}
+
+function isRestartingDockerContainer(error: unknown) {
+  const raw = error instanceof HttpError
+    ? String(error.details ?? error.message ?? "")
+    : error instanceof Error
+      ? error.message
+      : String(error ?? "");
+  const lower = raw.toLowerCase();
+  return lower.includes("is restarting") || lower.includes("wait until the container is running");
+}
+
+async function buildNodeConsensus(election: { chainElectionId: string; candidates: { number: string }[] }) {
+  const nodes = await Promise.all(
+    auditNodes.map(async (node) => {
+      try {
+        const realAudit = await blockchain.auditFromNode(election.chainElectionId, node.container);
+        const compromise = compromisedAuditNodes.get(node.id);
+        const audit = compromise ? tamperAudit(election, realAudit, compromise) : realAudit;
+        const fingerprint = auditFingerprint(audit);
+
+        return {
+          ...node,
+          status: compromise ? "compromised" : "online",
+          compromised: Boolean(compromise),
+          audit,
+          fingerprint
+        };
+      } catch (error) {
+        return {
+          ...node,
+          status: isRestartingDockerContainer(error) ? "starting" : "offline",
+          compromised: false,
+          audit: null,
+          fingerprint: null,
+          error: normalizeAuditError(error)
+        };
+      }
+    })
+  );
+
+  const groups = new Map<string, typeof nodes>();
+  for (const node of nodes) {
+    if (!node.fingerprint) continue;
+    groups.set(node.fingerprint, [...(groups.get(node.fingerprint) ?? []), node]);
+  }
+
+  const orderedGroups = [...groups.entries()].sort(([, left], [, right]) => right.length - left.length);
+  const [majorityFingerprint, majorityNodes = []] = orderedGroups[0] ?? [];
+  const hasMajority = majorityNodes.length >= 2;
+  const majorityAudit = hasMajority ? majorityNodes[0]?.audit : null;
+
+  return {
+    nodes,
+    majority: {
+      status: hasMajority ? "majority" : "no_majority",
+      fingerprint: hasMajority ? majorityFingerprint : null,
+      audit: majorityAudit,
+      nodeIds: majorityNodes.map((node) => node.id),
+      divergentNodeIds: nodes
+        .filter((node) => node.fingerprint && hasMajority && node.fingerprint !== majorityFingerprint)
+        .map((node) => node.id),
+      offlineNodeIds: nodes.filter((node) => node.status === "offline").map((node) => node.id)
+    }
+  };
 }
 
 function countTraditionalVotes(electionId: string) {
@@ -786,6 +1029,7 @@ router.post("/admin/elections", requireAuth, requireRole("ADMIN"), (req, res, ne
 
     store.all().elections.push(election);
     store.save();
+    syncTraditionalElectionFromVotify(election);
     res.status(201).json({ data: election });
   } catch (error) {
     next(error);
@@ -803,6 +1047,7 @@ router.patch("/admin/elections/:electionId", requireAuth, requireRole("ADMIN"), 
     if (endsAt) election.endsAt = endsAt;
     election.updatedAt = now();
     store.save();
+    syncTraditionalElectionFromVotify(election);
     res.json({ data: election });
   } catch (error) {
     next(error);
@@ -856,6 +1101,7 @@ router.put("/admin/elections/:electionId/ballot", requireAuth, requireRole("ADMI
     election.candidates = normalizedCandidates;
     election.updatedAt = now();
     store.save();
+    syncTraditionalElectionFromVotify(election);
     emitVisualEvent("ballot_saved", "votify", {
       options: normalizedCandidates.length
     });
@@ -886,6 +1132,7 @@ router.post("/admin/elections/:electionId/candidates", requireAuth, requireRole(
     election.candidates.push(candidate);
     election.updatedAt = now();
     store.save();
+    syncTraditionalElectionFromVotify(election);
     res.status(201).json({ data: candidate });
   } catch (error) {
     next(error);
@@ -918,6 +1165,7 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
 
     store.all().voters.push(voter);
     store.save();
+    syncTraditionalVoterFromVotify(election, String(cpf), String(publicKey));
     emitVisualEvent("voter_registration", "votify");
     res.status(201).json({
       data: {
@@ -1151,6 +1399,134 @@ router.get("/elections/:electionId/audit", requireAuth, requireRole("ADMIN", "AU
       emitVisualEvent("audit_recalculated", "votify");
     }
     res.json({ data: audit });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/elections/:electionId/audit/consensus", requireAuth, requireRole("ADMIN", "AUDITOR"), async (req, res, next) => {
+  try {
+    const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
+    const consensus = await buildNodeConsensus(election);
+    if (req.query.visual === "1") {
+      emitVisualEvent("consensus_checked", "votify", {
+        nodes: consensus.nodes.length,
+        offline: consensus.majority.offlineNodeIds.length,
+        divergent: consensus.majority.divergentNodeIds.length
+      });
+    }
+    res.json({ data: consensus });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/admin/nodes/:nodeId/compromise-audit", requireAuth, requireRole("ADMIN"), (req, res, next) => {
+  try {
+    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    const electionId = typeof req.body?.electionId === "string" ? req.body.electionId : "";
+    const election = electionId ? getElectionOrThrow(electionId) : store.all().elections[0];
+    if (!election) {
+      throw new HttpError(404, "ELECTION_NOT_FOUND", "Eleição não encontrada.");
+    }
+    const choice = typeof req.body?.choice === "string" && req.body.choice.trim()
+      ? req.body.choice.trim()
+      : defaultCompromiseChoice(election, null);
+    const amount = Number.isFinite(Number(req.body?.amount)) ? Math.max(1, Math.trunc(Number(req.body.amount))) : 10;
+
+    if (election?.candidates.length && !election.candidates.some((candidate) => candidate.number === choice)) {
+      throw new HttpError(400, "COMPROMISE_CHOICE_NOT_FOUND", "A opção adulterada não existe nesta eleição.");
+    }
+
+    compromisedAuditNodes.set(node.id, {
+      choice,
+      amount,
+      compromisedAt: now()
+    });
+
+    emitVisualEvent("node_compromised", "votify", {
+      node: node.id,
+      amount,
+      choice
+    });
+
+    res.json({
+      data: {
+        node,
+        compromised: true,
+        choice,
+        amount
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/admin/nodes/:nodeId/offline", requireAuth, requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    let output: unknown = null;
+    let alreadyUnavailable = false;
+
+    try {
+      output = await blockchain.stopNode(node.container);
+    } catch (error) {
+      if (!isMissingDockerContainer(error)) {
+        throw error;
+      }
+      alreadyUnavailable = true;
+      output = normalizeAuditError(error);
+    }
+
+    emitVisualEvent("node_offline", "votify", {
+      node: node.id
+    });
+
+    res.json({
+      data: {
+        node,
+        status: "offline",
+        alreadyUnavailable,
+        output
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/admin/nodes/:nodeId/restore", requireAuth, requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    compromisedAuditNodes.delete(node.id);
+    let output: unknown = null;
+    let containerMissing = false;
+
+    try {
+      output = await blockchain.startNode(node.container);
+    } catch (error) {
+      if (!isMissingDockerContainer(error)) {
+        throw error;
+      }
+      containerMissing = true;
+      output = normalizeAuditError(error);
+    }
+
+    emitVisualEvent("node_restored", "votify", {
+      node: node.id,
+      available: !containerMissing
+    });
+
+    res.json({
+      data: {
+        node,
+        status: containerMissing ? "missing" : "online",
+        compromised: false,
+        containerMissing,
+        output
+      }
+    });
   } catch (error) {
     next(error);
   }

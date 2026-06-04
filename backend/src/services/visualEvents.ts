@@ -12,7 +12,11 @@ export type VisualEventType =
   | "vote_rejected"
   | "receipt_verified"
   | "audit_recalculated"
-  | "vote_change_attempt";
+  | "vote_change_attempt"
+  | "consensus_checked"
+  | "node_compromised"
+  | "node_offline"
+  | "node_restored";
 
 export interface VisualEvent {
   id: string;
@@ -46,7 +50,7 @@ class VisualEventBus {
     this.clients.add(res);
     sendSse(res, "connected", {
       connected: true,
-      history: this.history.slice(-8)
+      history: this.history.filter((event) => event.system === "votify").slice(-8)
     });
 
     const heartbeat = setInterval(() => {
@@ -60,6 +64,8 @@ class VisualEventBus {
   }
 
   publish(input: VisualEventInput) {
+    if (input.system !== "votify") return null;
+
     const event: VisualEvent = {
       id: randomUUID(),
       occurredAt: input.occurredAt ?? new Date().toISOString(),

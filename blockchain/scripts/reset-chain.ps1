@@ -16,13 +16,14 @@ $BlockchainRoot = [System.IO.Path]::GetFullPath($BlockchainDir).TrimEnd(
 $targets = @(
   (Join-Path $BlockchainDir "master-data"),
   (Join-Path $BlockchainDir "slave-data"),
+  (Join-Path $BlockchainDir "fiscal2-data"),
   (Join-Path $BlockchainDir "reports")
 )
 
 if (-not $Force -and -not $WhatIfPreference) {
   Write-Host ""
   Write-Host "ATENCAO: este script remove containers, rede Docker e dados locais da blockchain." -ForegroundColor Yellow
-  Write-Host "Ele apaga master-data, slave-data e reports dentro de:" -ForegroundColor Yellow
+  Write-Host "Ele apaga master-data, slave-data, fiscal2-data e reports dentro de:" -ForegroundColor Yellow
   Write-Host "  $BlockchainDir" -ForegroundColor Yellow
   if ($RemoveImages) {
     Write-Host "Ele tambem remove a imagem Docker local criada pelo compose." -ForegroundColor Yellow

@@ -14,7 +14,11 @@ type VisualEventType =
   | "vote_rejected"
   | "receipt_verified"
   | "audit_recalculated"
-  | "vote_change_attempt";
+  | "vote_change_attempt"
+  | "consensus_checked"
+  | "node_compromised"
+  | "node_offline"
+  | "node_restored";
 
 type VisualEvent = {
   id: string;
@@ -35,8 +39,6 @@ type FlowDefinition = {
   steps: FlowStep[];
   failureStepIndex?: number;
 };
-
-type ConnectionState = "connecting" | "online" | "offline";
 
 type IconName =
   | "app"
@@ -167,6 +169,44 @@ const flows: Record<VisualEventType, FlowDefinition> = {
       { label: "Resultado", detail: "Contagem conferida", icon: "ballot" }
     ]
   },
+  consensus_checked: {
+    title: "Consenso entre nós",
+    steps: [
+      { label: "Master", detail: "Auditoria local", icon: "nodes" },
+      { label: "Fiscal 1", detail: "Auditoria local", icon: "nodes" },
+      { label: "Fiscal 2", detail: "Auditoria local", icon: "nodes" },
+      { label: "Comparação", detail: "Resultados confrontados", icon: "audit" },
+      { label: "Maioria", detail: "Resultado aceito", icon: "lock" }
+    ]
+  },
+  node_compromised: {
+    title: "Nó comprometido",
+    failureStepIndex: 1,
+    steps: [
+      { label: "Nó fiscal", detail: "Relatório invadido", icon: "warning" },
+      { label: "Auditoria falsa", detail: "Resultado adulterado", icon: "database" },
+      { label: "Outros nós", detail: "Cópias íntegras", icon: "nodes" },
+      { label: "Maioria", detail: "Divergência detectada", icon: "audit" }
+    ]
+  },
+  node_offline: {
+    title: "Nó fiscal offline",
+    failureStepIndex: 0,
+    steps: [
+      { label: "Nó fiscal", detail: "Container parado", icon: "warning" },
+      { label: "Rede", detail: "Demais nós continuam", icon: "nodes" },
+      { label: "Auditoria", detail: "Maioria disponível", icon: "audit" }
+    ]
+  },
+  node_restored: {
+    title: "Nó restaurado",
+    steps: [
+      { label: "Docker", detail: "Container reiniciado", icon: "api" },
+      { label: "Nó fiscal", detail: "Reconecta à rede", icon: "nodes" },
+      { label: "Streams", detail: "Dados disponíveis", icon: "stream" },
+      { label: "Auditoria", detail: "Resultado conferido", icon: "audit" }
+    ]
+  },
   vote_change_attempt: {
     title: "Tentativa de alteração",
     steps: [
@@ -210,10 +250,13 @@ const eventNames: Record<VisualEventType, string> = {
   vote_rejected: "Voto bloqueado",
   receipt_verified: "Comprovante verificado",
   audit_recalculated: "Auditoria recalculada",
-  vote_change_attempt: "Tentativa de alteração"
+  vote_change_attempt: "Tentativa de alteração",
+  consensus_checked: "Consenso conferido",
+  node_compromised: "Nó comprometido",
+  node_offline: "Nó offline",
+  node_restored: "Nó restaurado"
 };
 
-let connectionState: ConnectionState = "connecting";
 let activeStep = -1;
 let completedSteps = 0;
 let currentFlow = idleFlow;
@@ -221,6 +264,20 @@ let currentEvent: VisualEvent | null = null;
 let isPlaying = false;
 let queue: VisualEvent[] = [];
 let history: VisualEvent[] = [];
+let eventSource: EventSource | null = null;
+const seenEventIds: string[] = [];
+
+function rememberEventId(id: string) {
+  if (seenEventIds.includes(id)) return;
+  seenEventIds.push(id);
+  if (seenEventIds.length > 80) {
+    seenEventIds.splice(0, seenEventIds.length - 80);
+  }
+}
+
+function hasSeenEvent(id: string) {
+  return seenEventIds.includes(id);
+}
 
 function escapeHtml(value: string) {
   return value
@@ -234,12 +291,6 @@ function icon(name: IconName) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name]}</svg>`;
 }
 
-function statusLabel() {
-  if (connectionState === "online") return "Conectado";
-  if (connectionState === "offline") return "Reconectando";
-  return "Conectando";
-}
-
 function eventSystemLabel(system: VisualSystem) {
   return system === "votifalho" ? "Votifalho" : "Votify";
 }
@@ -249,6 +300,8 @@ function isFailureEvent(event: VisualEvent | null | undefined) {
     event &&
       (event.type === "vote_rejected" ||
         event.type === "election_lock_rejected" ||
+        event.type === "node_compromised" ||
+        event.type === "node_offline" ||
         (event.type === "vote_change_attempt" && event.metadata?.accepted === false))
   );
 }
@@ -365,7 +418,10 @@ async function playNext() {
   const event = queue.shift();
   if (!event) {
     isPlaying = false;
+    currentEvent = null;
+    currentFlow = idleFlow;
     activeStep = -1;
+    completedSteps = 0;
     render();
     return;
   }
@@ -399,7 +455,11 @@ async function playNext() {
 }
 
 function enqueue(event: VisualEvent) {
+  if (event.system !== "votify") return;
+  if (hasSeenEvent(event.id)) return;
+  rememberEventId(event.id);
   history = [event, ...history.filter((item) => item.id !== event.id)].slice(0, 10);
+  queue = queue.filter((item) => item.id !== event.id);
   queue.push(event);
   render();
 
@@ -409,30 +469,25 @@ function enqueue(event: VisualEvent) {
 }
 
 function connect() {
+  eventSource?.close();
   const source = new EventSource(`${API_BASE}/visual/events`);
+  eventSource = source;
 
   source.addEventListener("connected", (message) => {
-    connectionState = "online";
     const payload = JSON.parse((message as MessageEvent).data) as { history?: VisualEvent[] };
-    history = [...(payload.history ?? [])].reverse().slice(0, 10);
+    const serverHistory = (payload.history ?? []).filter((event) => event.system === "votify");
+    serverHistory.forEach((event) => rememberEventId(event.id));
+    history = [...serverHistory].reverse().slice(0, 10);
     render();
   });
 
   source.addEventListener("visual_event", (message) => {
-    connectionState = "online";
     const event = JSON.parse((message as MessageEvent).data) as VisualEvent;
     enqueue(event);
   });
 
-  source.addEventListener("heartbeat", () => {
-    connectionState = "online";
-    render();
-  });
-
-  source.onerror = () => {
-    connectionState = "offline";
-    render();
-  };
+  source.addEventListener("heartbeat", () => undefined);
+  source.onerror = () => undefined;
 }
 
 render();

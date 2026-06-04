@@ -74,6 +74,40 @@ function runBlockchain(args: string[]): Promise<unknown> {
   });
 }
 
+function runDocker(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "docker",
+      args,
+      {
+        cwd: env.blockchainDir,
+        shell: false,
+        timeout: 30_000,
+        windowsHide: true
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(
+            new HttpError(
+              503,
+              "DOCKER_COMMAND_FAILED",
+              "Falha ao executar comando Docker.",
+              (stderr || stdout || error.message).trim()
+            )
+          );
+          return;
+        }
+
+        resolve(stdout.trim());
+      }
+    );
+  });
+}
+
+function withNode(args: string[], container: string) {
+  return [...args, "--master", container];
+}
+
 export const blockchain = {
   hashCpf(cpf: string, electionId: string) {
     return runBlockchain([
@@ -133,8 +167,24 @@ export const blockchain = {
     return runBlockchain(["audit", "--election-id", electionId]);
   },
 
+  auditFromNode(electionId: string, container: string) {
+    return runBlockchain(withNode(["audit", "--election-id", electionId], container));
+  },
+
   status() {
     return runBlockchain(["status"]);
+  },
+
+  statusFromNode(container: string) {
+    return runBlockchain(withNode(["status"], container));
+  },
+
+  stopNode(container: string) {
+    return runDocker(["stop", container]);
+  },
+
+  startNode(container: string) {
+    return runDocker(["start", container]);
   },
 
   lockGovernance() {

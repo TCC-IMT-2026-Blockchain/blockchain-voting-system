@@ -119,6 +119,7 @@ if (-not $NoReset) {
   Write-Step "Resetando dados da demo"
   Clear-DirectoryContents (Join-Path $BlockchainDir "master-data")
   Clear-DirectoryContents (Join-Path $BlockchainDir "slave-data")
+  Clear-DirectoryContents (Join-Path $BlockchainDir "fiscal2-data")
   Clear-DirectoryContents (Join-Path $BackendDir "data")
 } else {
   Write-Step "Mantendo dados existentes por causa de -NoReset"
@@ -128,6 +129,8 @@ Write-Step "Subindo e configurando a blockchain"
 Push-Location $BlockchainDir
 try {
   python .\scripts\votify.py up
+  python .\scripts\votify.py authorize-slave
+  python .\scripts\votify.py authorize-slave --slave "votify-fiscal-2"
   python .\scripts\votify.py setup
 } finally {
   Pop-Location
@@ -168,7 +171,7 @@ Start-NpmApp -Name "visualizador" -Path $VisualizerDir -Arguments @("run", "dev"
 Start-Sleep -Seconds 5
 
 Write-Step "Resumo"
-Write-Host "Blockchain: containers votify-master e votify-slave"
+Write-Host "Blockchain: containers votify-master, votify-slave e votify-fiscal-2"
 Write-Host "Backend:    http://localhost:3333/api/v1"
 Write-Host "Frontend:   http://localhost:5173"
 Write-Host "Visual:     http://localhost:5174"

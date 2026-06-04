@@ -55,6 +55,32 @@ type AuditReport = {
   duplicate_votes?: number;
   centralized_records?: number;
   personal_data_exposed?: number;
+  compromised_report?: boolean;
+  compromise_note?: string;
+};
+
+type NodeAudit = {
+  id: "master" | "fiscal-1" | "fiscal-2";
+  name: string;
+  container: string;
+  role: "master" | "fiscal";
+  status: "online" | "compromised" | "offline" | "starting";
+  compromised: boolean;
+  audit: AuditReport | null;
+  fingerprint: string | null;
+  error?: string;
+};
+
+type ConsensusAudit = {
+  nodes: NodeAudit[];
+  majority: {
+    status: "majority" | "no_majority";
+    fingerprint: string | null;
+    audit: AuditReport | null;
+    nodeIds: string[];
+    divergentNodeIds: string[];
+    offlineNodeIds: string[];
+  };
 };
 
 type AttackResult = {
@@ -120,6 +146,15 @@ function saveDemoVoters(mode: SystemMode, voters: DemoVoter[]) {
   localStorage.setItem(demoVotersStorageKey(mode), JSON.stringify(voters));
 }
 
+function addDemoVoterToMode(mode: SystemMode, voter: DemoVoter) {
+  const voters = loadDemoVoters(mode).filter(
+    (item) => item.cpf !== voter.cpf && item.privateKey !== voter.privateKey
+  );
+  const updated = [voter, ...voters];
+  saveDemoVoters(mode, updated);
+  return updated;
+}
+
 const initialMode = loadSystemMode();
 
 const state = {
@@ -135,6 +170,7 @@ const state = {
   txid: "",
   receipt: null as Receipt | null,
   audit: null as AuditReport | null,
+  consensus: null as ConsensusAudit | null,
   attackFromChoice: "",
   attackToChoice: "",
   attackResult: null as AttackResult | null,
@@ -280,6 +316,7 @@ function resetRuntimeStateForMode(mode: SystemMode) {
   state.txid = "";
   state.receipt = null;
   state.audit = null;
+  state.consensus = null;
   state.attackFromChoice = "";
   state.attackToChoice = "";
   state.attackResult = null;
@@ -348,8 +385,11 @@ async function registerVoter() {
       })
     });
 
-    state.demoVoters = [{ cpf: state.configCpf, privateKey: state.configPrivateKey }, ...state.demoVoters];
-    saveDemoVoters(state.mode, state.demoVoters);
+    const voter = { cpf: state.configCpf, privateKey: state.configPrivateKey };
+    state.demoVoters = addDemoVoterToMode(state.mode, voter);
+    if (state.mode === "votify") {
+      addDemoVoterToMode("votifalho", voter);
+    }
   });
 }
 
@@ -435,6 +475,18 @@ async function refreshAuditAndStatus(visual = false) {
     headers: { Authorization: `Bearer ${state.adminToken}` }
   });
   state.audit = audit.data;
+
+  if (state.mode === "votify") {
+    const consensus = await api<{ data: ConsensusAudit }>(
+      `/elections/${state.election.id}/audit/consensus${visual ? "?visual=1" : ""}`,
+      {
+        headers: { Authorization: `Bearer ${state.adminToken}` }
+      }
+    );
+    state.consensus = consensus.data;
+  } else {
+    state.consensus = null;
+  }
 }
 
 async function refreshRouteData() {
@@ -442,7 +494,7 @@ async function refreshRouteData() {
   if (!state.initialized) return;
   if (currentRoute === "auditoria" || currentRoute === "admin") {
     try {
-      await refreshAuditAndStatus(currentRoute === "auditoria");
+      await refreshAuditAndStatus();
       normalizeAttackChoices();
       render();
     } catch (error) {
@@ -555,6 +607,48 @@ async function executeNodeCommand() {
   });
 }
 
+async function compromiseFiscalNode() {
+  if (!state.election || state.mode !== "votify") return;
+
+  const choice = state.election.candidates[0]?.number ?? "1";
+  await withBusy(async () => {
+    await api("/admin/nodes/fiscal-2/compromise-audit", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${state.adminToken}` },
+      body: JSON.stringify({
+        electionId: state.election!.id,
+        choice,
+        amount: 10
+      })
+    });
+    await refreshAuditAndStatus();
+  });
+}
+
+async function stopFiscalNode() {
+  if (state.mode !== "votify") return;
+
+  await withBusy(async () => {
+    await api("/admin/nodes/fiscal-2/offline", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${state.adminToken}` }
+    });
+    await refreshAuditAndStatus();
+  });
+}
+
+async function restoreFiscalNode() {
+  if (state.mode !== "votify") return;
+
+  await withBusy(async () => {
+    await api("/admin/nodes/fiscal-2/restore", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${state.adminToken}` }
+    });
+    await refreshAuditAndStatus();
+  });
+}
+
 function addCandidateDraft() {
   if (isElectionLocked()) return;
   state.ballotCandidates = [...state.ballotCandidates, { name: "", number: "" }];
@@ -651,8 +745,7 @@ function renderMetric(label: string, value: string | number, extraClass = "") {
   `;
 }
 
-function renderVoteResults() {
-  const votes = state.audit?.votes_by_choice ?? {};
+function renderVoteResultsFor(votes: Record<string, number> = {}) {
   const entries = state.election?.candidates.length
     ? state.election.candidates.map((candidate) => [candidate.number, votes[candidate.number] ?? 0] as const)
     : (Object.entries(votes) as [string, number][]);
@@ -677,6 +770,10 @@ function renderVoteResults() {
         .join("")}
     </div>
   `;
+}
+
+function renderVoteResults() {
+  return renderVoteResultsFor(state.audit?.votes_by_choice ?? {});
 }
 
 function renderAuditSummary() {
@@ -709,9 +806,106 @@ function renderAuditSummary() {
       ${renderMetric("Tokens consumidos", burnedTokens)}
       ${renderMetric("Blocos da rede", audit.chain_height ?? "-")}
     </div>
+  `;
+}
+
+function nodeStatusLabel(status: NodeAudit["status"]) {
+  if (status === "compromised") return "comprometido";
+  if (status === "starting") return "inicializando";
+  if (status === "offline") return "offline";
+  return "online";
+}
+
+function nodeShortName(id: string) {
+  if (id === "master") return "Nó 1";
+  if (id === "fiscal-1") return "Nó 2";
+  if (id === "fiscal-2") return "Nó 3";
+  return id;
+}
+
+function nodeUnavailableMessage(node: NodeAudit) {
+  if (node.status === "offline") return "Nó offline. A contagem continua pelos outros nós.";
+  if (node.status === "starting") return "Nó inicializando. Aguarde alguns segundos.";
+  return node.error ?? "Nó indisponível.";
+}
+
+function renderNodeAuditCard(node: NodeAudit) {
+  const statusClass = node.status === "online" ? "ok" : node.status === "compromised" ? "danger" : "muted";
+
+  return `
+    <div class="node-audit-card ${node.status}">
+      <div class="node-audit-head">
+        <strong>${escapeHtml(node.name)}</strong>
+        <span class="${statusClass}">${nodeStatusLabel(node.status)}</span>
+      </div>
+      ${
+        node.audit
+          ? `${renderVoteResultsFor(node.audit.votes_by_choice ?? {})}
+             ${
+               node.audit.compromise_note
+                 ? `<p class="node-note">${escapeHtml(node.audit.compromise_note)}</p>`
+                 : ""
+             }`
+          : `<div class="empty-box small node-error">${escapeHtml(nodeUnavailableMessage(node))}</div>`
+      }
+    </div>
+  `;
+}
+
+function renderNodeControls() {
+  return `
+    <div class="consensus-actions">
+      <button id="compromiseNode" class="secondary" ${state.busy ? "disabled" : ""}>Comprometer Nó 3</button>
+      <button id="stopNode" class="secondary" ${state.busy ? "disabled" : ""}>Derrubar Nó 3</button>
+      <button id="restoreNode" class="primary" ${state.busy ? "disabled" : ""}>Restaurar Nó 3</button>
+    </div>
+  `;
+}
+
+function renderConsensusPanel(showNodeControls = false) {
+  if (state.mode !== "votify") return "";
+  const consensus = state.consensus;
+  if (!consensus) {
+    return `
+      <section class="audit-section">
+        <h3>Contagem</h3>
+        ${showNodeControls ? renderNodeControls() : ""}
+        <div class="empty-box"></div>
+      </section>
+    `;
+  }
+
+  const majorityAudit = consensus.majority.audit;
+  const hasMajority = consensus.majority.status === "majority" && majorityAudit;
+
+  return `
     <section class="audit-section">
       <h3>Contagem</h3>
-      ${renderVoteResults()}
+      ${showNodeControls ? renderNodeControls() : ""}
+      <div class="node-audit-grid">
+        ${consensus.nodes.map(renderNodeAuditCard).join("")}
+      </div>
+      <div class="majority-box ${hasMajority ? "ok" : "danger"}">
+        <div class="node-audit-head">
+          <strong>Resultado por maioria</strong>
+          <span>${hasMajority ? consensus.majority.nodeIds.map(nodeShortName).join(" + ") : "sem maioria"}</span>
+        </div>
+        ${
+          hasMajority
+            ? renderVoteResultsFor(majorityAudit.votes_by_choice ?? {})
+            : `<div class="empty-box small">Não há nós suficientes concordando.</div>`
+        }
+        ${
+          consensus.majority.divergentNodeIds.length
+            ? `<p class="node-note">Divergente: ${consensus.majority.divergentNodeIds.map(nodeShortName).join(", ")}</p>`
+            : ""
+        }
+        ${
+          consensus.majority.offlineNodeIds.length
+            ? `<p class="node-note">Offline: ${consensus.majority.offlineNodeIds.map(nodeShortName).join(", ")}</p>`
+            : ""
+        }
+      </div>
     </section>
   `;
 }
@@ -990,6 +1184,7 @@ function renderAuditPage() {
           <h2>Auditoria Geral</h2>
         </div>
         ${renderAuditSummary()}
+        ${renderConsensusPanel()}
       </article>
     </section>
   `;
@@ -1070,12 +1265,17 @@ function renderAdminPage() {
         </div>
       </article>
 
-      <article class="panel admin-count">
-        <div class="panel-title">
-          <h2>Contagem atual</h2>
-        </div>
-        ${state.audit ? renderVoteResults() : `<div class="empty-box"></div>`}
-      </article>
+      ${
+        state.mode === "votify"
+          ? `<article class="panel admin-node-panel">
+              <div class="panel-title">
+                <h2>Controle de nós</h2>
+              </div>
+              ${renderConsensusPanel(true)}
+            </article>`
+          : ""
+      }
+
     </section>
   `;
 }
@@ -1231,6 +1431,9 @@ function bindCommonEvents() {
   document.querySelector<HTMLButtonElement>("#castVote")?.addEventListener("click", () => void castVote());
   document.querySelector<HTMLButtonElement>("#executeAttack")?.addEventListener("click", () => void executeChangeVoteAttack());
   document.querySelector<HTMLButtonElement>("#executeNodeCommand")?.addEventListener("click", () => void executeNodeCommand());
+  document.querySelector<HTMLButtonElement>("#compromiseNode")?.addEventListener("click", () => void compromiseFiscalNode());
+  document.querySelector<HTMLButtonElement>("#stopNode")?.addEventListener("click", () => void stopFiscalNode());
+  document.querySelector<HTMLButtonElement>("#restoreNode")?.addEventListener("click", () => void restoreFiscalNode());
   document.querySelector<HTMLButtonElement>("#modeSwitch")?.addEventListener("click", (event) => {
     const nextMode = (event.currentTarget as HTMLButtonElement).dataset.nextMode;
     if (nextMode === "votify" || nextMode === "votifalho") {

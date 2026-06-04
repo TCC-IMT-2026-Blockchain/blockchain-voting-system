@@ -28,6 +28,7 @@ REPORTS_DIR = ROOT / "reports"
 DEFAULT_CHAIN = "votifychain"
 DEFAULT_MASTER = "votify-master"
 DEFAULT_SLAVE = "votify-slave"
+DEFAULT_SLAVE2 = "votify-fiscal-2"
 DEFAULT_ASSET = "VOTE_ELEICAO_001"
 IDENTITIES_STREAM = "identidades"
 CREDENTIALS_STREAM = "credenciais_emitidas"
@@ -97,11 +98,36 @@ def run_process(args: list[str], cwd: Path | None = None, check: bool = True) ->
     return parse_cli_output(completed.stdout)
 
 
+def run_process_text(args: list[str], cwd: Path | None = None, check: bool = True) -> str:
+    completed = subprocess.run(
+        args,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if check and completed.returncode != 0:
+        command = " ".join(args)
+        raise VotifyError(
+            f"Comando falhou ({completed.returncode}): {command}\n"
+            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+        )
+
+    return f"{completed.stdout}\n{completed.stderr}".strip()
+
+
 class MultiChain:
-    def __init__(self, chain: str, master: str, slave: str | None = None) -> None:
+    def __init__(self, chain: str, master: str, slave: str | None = None, slave2: str | None = None) -> None:
         self.chain = chain
         self.master = master
         self.slave = slave
+        self.slave2 = slave2
+
+    def containers(self) -> list[str]:
+        return [container for container in [self.master, self.slave, self.slave2] if container]
 
     def cli(self, cli_args: list[Any], container: str | None = None, check: bool = True) -> Any:
         target = container or self.master
@@ -123,8 +149,8 @@ def first_address_with_permission(mc: MultiChain, permission: str) -> str:
     return address
 
 
-def list_by_name(mc: MultiChain, command: str, name: str) -> list[dict[str, Any]]:
-    result = mc.cli([command, name], check=False)
+def list_by_name(mc: MultiChain, command: str, name: str, container: str | None = None) -> list[dict[str, Any]]:
+    result = mc.cli([command, name], container=container, check=False)
     if isinstance(result, list):
         return result
     return []
@@ -143,11 +169,7 @@ def filter_exists(mc: MultiChain, command: str, name: str) -> bool:
 
 
 def configure_filter_runtime(mc: MultiChain) -> None:
-    containers = [mc.master]
-    if mc.slave:
-        containers.append(mc.slave)
-
-    for container in containers:
+    for container in mc.containers():
         for param in ("sendfiltertimeout", "acceptfiltertimeout"):
             mc.cli(
                 ["setruntimeparam", param, str(FILTER_RUNTIME_TIMEOUT_MS)],
@@ -177,7 +199,12 @@ def ensure_stream(mc: MultiChain, name: str, open_to_all_writers: bool = False) 
 
 def subscribe_streams(mc: MultiChain, container: str, streams: list[str]) -> None:
     for stream in streams:
-        mc.cli(["subscribe", stream], container=container, check=False)
+        mc.cli(["subscribe", stream, "true"], container=container)
+        wait_until(
+            f"assinatura de {stream} em {container}",
+            lambda: any(item.get("subscribed") is True for item in list_by_name(mc, "liststreams", stream, container=container)),
+            timeout_seconds=120,
+        )
         print(f"subscribed {container}: {stream}")
 
 
@@ -290,17 +317,18 @@ def test_and_create_stream_filter(mc: MultiChain) -> None:
     code = (FILTERS_DIR / "urna_stream_filter.js").read_text(encoding="utf-8")
     mc.cli(["teststreamfilter", "{}", code])
 
-    if not filter_exists(mc, "liststreamfilters", URNA_STREAM_FILTER):
-        mc.cli(["create", "streamfilter", URNA_STREAM_FILTER, "{}", code])
-        wait_until(
-            f"stream filter {URNA_STREAM_FILTER}",
-            lambda: filter_exists(mc, "liststreamfilters", URNA_STREAM_FILTER),
-        )
-        print(f"stream filter created: {URNA_STREAM_FILTER}")
-    else:
+    if filter_exists(mc, "liststreamfilters", URNA_STREAM_FILTER):
         print(f"stream filter ok: {URNA_STREAM_FILTER}")
+        return
 
     admin = first_address_with_permission(mc, "admin")
+    mc.cli(["create", "streamfilter", URNA_STREAM_FILTER, "{}", code])
+    wait_until(
+        f"stream filter {URNA_STREAM_FILTER}",
+        lambda: filter_exists(mc, "liststreamfilters", URNA_STREAM_FILTER),
+    )
+    print(f"stream filter created: {URNA_STREAM_FILTER}")
+
     approval = {"for": BALLOT_STREAM, "approve": True}
     mc.cli(["approvefrom", admin, URNA_STREAM_FILTER, compact_json(approval)], check=False)
     print(f"stream filter approved for: {BALLOT_STREAM}")
@@ -316,6 +344,14 @@ def render_vote_tx_filter(asset: str, burn_address: str) -> str:
 
 
 def test_and_create_tx_filter(mc: MultiChain, asset: str, burn_address: str) -> None:
+    code = render_vote_tx_filter(asset, burn_address)
+    options = {"for": BALLOT_STREAM}
+    mc.cli(["testtxfilter", compact_json(options), code])
+
+    if filter_exists(mc, "listtxfilters", VOTE_TX_FILTER):
+        print(f"transaction filter ok: {VOTE_TX_FILTER}")
+        return
+
     admin = first_address_with_permission(mc, "admin")
 
     for legacy_filter in LEGACY_TX_FILTERS:
@@ -323,30 +359,23 @@ def test_and_create_tx_filter(mc: MultiChain, asset: str, burn_address: str) -> 
             mc.cli(["approvefrom", admin, legacy_filter, "false"], check=False)
             print(f"legacy transaction filter deactivated: {legacy_filter}")
 
-    code = render_vote_tx_filter(asset, burn_address)
-    options = {"for": BALLOT_STREAM}
-    mc.cli(["testtxfilter", compact_json(options), code])
-
-    if not filter_exists(mc, "listtxfilters", VOTE_TX_FILTER):
-        mc.cli(["create", "txfilter", VOTE_TX_FILTER, compact_json(options), code])
-        wait_until(
-            f"transaction filter {VOTE_TX_FILTER}",
-            lambda: filter_exists(mc, "listtxfilters", VOTE_TX_FILTER),
-        )
-        print(f"transaction filter created: {VOTE_TX_FILTER}")
-    else:
-        print(f"transaction filter ok: {VOTE_TX_FILTER}")
+    mc.cli(["create", "txfilter", VOTE_TX_FILTER, compact_json(options), code])
+    wait_until(
+        f"transaction filter {VOTE_TX_FILTER}",
+        lambda: filter_exists(mc, "listtxfilters", VOTE_TX_FILTER),
+    )
+    print(f"transaction filter created: {VOTE_TX_FILTER}")
 
     mc.cli(["approvefrom", admin, VOTE_TX_FILTER, "true"], check=False)
     print(f"transaction filter approved: {VOTE_TX_FILTER}")
 
 
-def wait_for_node(mc: MultiChain, timeout_seconds: int = 60) -> None:
+def wait_for_node(mc: MultiChain, timeout_seconds: int = 60, container: str | None = None) -> None:
     deadline = time.time() + timeout_seconds
     last_error = ""
     while time.time() < deadline:
         try:
-            info = mc.cli(["getinfo"])
+            info = mc.cli(["getinfo"], container=container)
             if isinstance(info, dict) and info.get("chainname") == mc.chain:
                 return
         except Exception as exc:  # noqa: BLE001 - used for polling readiness
@@ -659,7 +688,7 @@ def save_report(report: dict[str, Any], name: str) -> Path:
 
 
 def cmd_up(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     mc.compose(["up", "-d", "--build"])
     wait_for_node(mc, args.timeout)
     configure_filter_runtime(mc)
@@ -667,7 +696,7 @@ def cmd_up(args: argparse.Namespace) -> None:
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     wait_for_node(mc, args.timeout)
     configure_filter_runtime(mc)
 
@@ -675,8 +704,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
     ensure_stream(mc, CREDENTIALS_STREAM, open_to_all_writers=False)
     ensure_stream(mc, BALLOT_STREAM, open_to_all_writers=False)
     subscribe_streams(mc, args.master, [IDENTITIES_STREAM, CREDENTIALS_STREAM, BALLOT_STREAM])
-    if args.slave:
-        subscribe_streams(mc, args.slave, [IDENTITIES_STREAM, CREDENTIALS_STREAM, BALLOT_STREAM])
+    for container in [args.slave, args.slave2]:
+        if container:
+            wait_for_node(mc, args.timeout, container=container)
+            subscribe_streams(mc, container, [IDENTITIES_STREAM, CREDENTIALS_STREAM, BALLOT_STREAM])
 
     ensure_asset(mc, args.asset, args.initial_supply)
     burn_address = get_burn_address(mc)
@@ -695,13 +726,13 @@ def cmd_hash_cpf(args: argparse.Namespace) -> None:
 
 
 def cmd_register_voter(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     txid = register_voter(mc, args.election_id, args.voter_id_hash, args.public_key)
     print(json.dumps({"identity_txid": txid}, ensure_ascii=False, indent=2))
 
 
 def cmd_issue_credential(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     result = issue_credential(
         mc,
         election_id=args.election_id,
@@ -714,19 +745,19 @@ def cmd_issue_credential(args: argparse.Namespace) -> None:
 
 
 def cmd_cast_vote(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     result = cast_vote(mc, args.election_id, args.choice, args.voter_address, args.asset)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_receipt(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     receipt = build_receipt(mc, args.txid, election_id=args.election_id)
     print(json.dumps(receipt, ensure_ascii=False, indent=2))
 
 
 def cmd_audit(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     report = audit(mc, args.election_id, args.asset)
     if args.output:
         path = save_report(report, args.output)
@@ -735,7 +766,7 @@ def cmd_audit(args: argparse.Namespace) -> None:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     status = {
         "info": mc.cli(["getinfo"]),
         "streams": mc.cli(["liststreams"]),
@@ -748,13 +779,13 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 def cmd_lock_governance(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     result = lock_governance(mc, args.asset)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_grant_address(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     grant_global(mc, args.address, args.permissions)
     if args.stream_write:
         grant_stream_write(mc, args.address, args.stream_write)
@@ -762,14 +793,21 @@ def cmd_grant_address(args: argparse.Namespace) -> None:
 
 
 def cmd_authorize_slave(args: argparse.Namespace) -> None:
-    mc = MultiChain(args.chain, args.master, args.slave)
-    logs = run_process(["docker", "logs", args.slave], check=False)
-    logs_text = logs if isinstance(logs, str) else json.dumps(logs)
-    match = re.search(r"grant\s+([A-Za-z0-9]+)\s+connect(?:,send,receive)?", logs_text)
-    if not match:
-        raise VotifyError(f"Não foi possível encontrar o endereço pendente do nó fiscal nos logs do Docker para {args.slave}")
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
+    deadline = time.time() + args.timeout
+    addresses: list[str] = []
 
-    address = match.group(1)
+    while time.time() < deadline:
+        logs_text = run_process_text(["docker", "logs", args.slave], check=False)
+        addresses = re.findall(r"\bgrant\s+([A-Za-z0-9]+)\s+connect(?:,send,receive)?\b", logs_text)
+        if addresses:
+            break
+        time.sleep(2)
+
+    if not addresses:
+        raise VotifyError(f"Não foi possível encontrar o endereço pendente do nó nos logs do Docker para {args.slave}")
+
+    address = addresses[-1]
     grant_global(mc, address, "connect,send,receive")
     print(json.dumps({"slave_container": args.slave, "authorized_address": address}, indent=2))
 
@@ -778,6 +816,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chain", default=os.getenv("VOTIFY_CHAIN", DEFAULT_CHAIN))
     parser.add_argument("--master", default=os.getenv("VOTIFY_MASTER_CONTAINER", DEFAULT_MASTER))
     parser.add_argument("--slave", default=os.getenv("VOTIFY_SLAVE_CONTAINER", DEFAULT_SLAVE))
+    parser.add_argument("--slave2", default=os.getenv("VOTIFY_SLAVE2_CONTAINER", DEFAULT_SLAVE2))
     parser.add_argument("--asset", default=os.getenv("VOTIFY_ASSET", DEFAULT_ASSET))
 
 
@@ -854,6 +893,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     slave = sub.add_parser("authorize-slave", help="authorize the pending slave node from its logs")
     add_common(slave)
+    slave.add_argument("--timeout", type=int, default=60)
     slave.set_defaults(func=cmd_authorize_slave)
 
     return parser
