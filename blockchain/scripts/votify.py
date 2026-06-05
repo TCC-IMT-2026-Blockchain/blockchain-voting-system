@@ -199,6 +199,9 @@ def ensure_stream(mc: MultiChain, name: str, open_to_all_writers: bool = False) 
 
 def subscribe_streams(mc: MultiChain, container: str, streams: list[str]) -> None:
     for stream in streams:
+        wait_until(f"stream {stream} on {container}", lambda: list_by_name(mc, "liststreams", stream, container=container), timeout_seconds=30)
+        
+    for stream in streams:
         mc.cli(["subscribe", stream, "true"], container=container)
         wait_until(
             f"assinatura de {stream} em {container}",

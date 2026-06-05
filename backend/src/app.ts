@@ -55,7 +55,18 @@ function ensureElectionIsUnlocked(election: { governanceLockedAt?: string | null
 function getTraditionalElectionOrThrow(id: string) {
   const election = traditionalStore.all().elections.find((item) => item.id === id);
   if (!election) {
-    throw new HttpError(404, "ELECTION_NOT_FOUND", "Eleição não encontrada.");
+    return {
+      id: id,
+      chainElectionId: "BANCO_TRADICIONAL_001",
+      title: "Banco de dados corrompido ou apagado",
+      description: "O banco de dados centralizado não está disponível.",
+      status: "OPEN",
+      startsAt: now(),
+      endsAt: now(),
+      candidates: [],
+      createdAt: now(),
+      updatedAt: now()
+    };
   }
   return election;
 }
@@ -80,11 +91,11 @@ function getOrCreateTraditionalMirrorElection(sourceElection: ReturnType<typeof 
     db.elections.push(election);
   }
 
-  return election;
+  return { election, db };
 }
 
 function syncTraditionalElectionFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>) {
-  const mirror = getOrCreateTraditionalMirrorElection(sourceElection);
+  const { election: mirror, db } = getOrCreateTraditionalMirrorElection(sourceElection);
 
   mirror.title = sourceElection.title;
   mirror.description = sourceElection.description;
@@ -103,14 +114,14 @@ function syncTraditionalElectionFromVotify(sourceElection: ReturnType<typeof get
     };
   });
 
-  traditionalStore.save();
+  traditionalStore.save(db);
   return mirror;
 }
 
 function syncTraditionalVoterFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>, cpf: string, publicKey: string) {
   const mirror = syncTraditionalElectionFromVotify(sourceElection);
-  const voters = traditionalStore.all().voters;
-  const existing = voters.find(
+  const db = traditionalStore.all();
+  const existing = db.voters.find(
     (item) => item.electionId === mirror.id && (item.publicKey === publicKey || item.cpf === cpf)
   );
 
@@ -118,7 +129,7 @@ function syncTraditionalVoterFromVotify(sourceElection: ReturnType<typeof getEle
     existing.cpf = cpf;
     existing.publicKey = publicKey;
   } else {
-    voters.push({
+    db.voters.push({
       id: randomUUID(),
       electionId: mirror.id,
       cpf,
@@ -127,7 +138,7 @@ function syncTraditionalVoterFromVotify(sourceElection: ReturnType<typeof getEle
     });
   }
 
-  traditionalStore.save();
+  traditionalStore.save(db);
   return mirror;
 }
 
@@ -430,11 +441,11 @@ function parseNodeCommand(command: string) {
     return { type: "change_vote" as const, fromChoice, toChoice };
   }
 
-  throw new HttpError(
-    400,
-    "NODE_COMMAND_NOT_SUPPORTED",
-    "Comando não reconhecido. Use: status ou alterar-voto <origem> <destino>."
-  );
+  if (action === "comprometer-banco") {
+    return { type: "compromise_db" as const };
+  }
+
+  return { type: "unrecognized" as const };
 }
 
 function quotePowerShell(value: string) {
@@ -481,7 +492,24 @@ function status {
   Write-Output ${quotePowerShell(`Terminal conectado ao ${label}.`)}
 }
 function ajuda {
-  Write-Output 'Comandos auxiliares: alterar-voto <origem> <destino>, status, ajuda. Outros comandos do PowerShell tambem sao executados.'
+  Write-Output 'Comandos auxiliares: alterar-voto <origem> <destino>, derrubar-banco, status, ajuda. Outros comandos do PowerShell tambem sao executados.'
+}
+function derrubar-banco {
+  if (${quotePowerShell(mode)} -eq 'votifalho') {
+    Remove-Item -Force -ErrorAction SilentlyContinue ./data/traditional-db.json
+    Write-Output 'Banco de dados central apagado com sucesso. Sistema comprometido.'
+  } else {
+    Write-Output 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
+  }
+}
+function comprometer-banco {
+  if (${quotePowerShell(mode)} -eq 'votifalho') {
+    $body = @{ electionId = ${quotePowerShell(electionId)}; command = "comprometer-banco" } | ConvertTo-Json -Compress
+    $response = Invoke-RestMethod -Uri ${quotePowerShell(apiBaseForMode(mode) + "/maintenance/node-command")} -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
+    Write-Output 'Banco de dados central comprometido. 10 votos injetados com sucesso.'
+  } else {
+    Write-Output 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
+  }
 }
 ${command}
 `;
@@ -505,7 +533,25 @@ status() {
   echo ${quoteShell(`Terminal conectado ao ${label}.`)}
 }
 ajuda() {
-  echo 'Comandos auxiliares: alterar-voto <origem> <destino>, status, ajuda. Outros comandos do shell tambem sao executados.'
+  echo 'Comandos auxiliares: alterar-voto <origem> <destino>, derrubar-banco, status, ajuda. Outros comandos do shell tambem sao executados.'
+}
+derrubar-banco() {
+  if [ ${quoteShell(mode)} = 'votifalho' ]; then
+    rm -f ./data/traditional-db.json
+    echo 'Banco de dados central apagado com sucesso. Sistema comprometido.'
+  else
+    echo 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
+  fi
+}
+comprometer-banco() {
+  if [ ${quoteShell(mode)} = 'votifalho' ]; then
+    curl -sS -X POST ${quoteShell(apiBaseForMode(mode) + "/maintenance/node-command")} \
+      -H 'Content-Type: application/json' \
+      --data '{"electionId":${JSON.stringify(electionId)},"command":"comprometer-banco"}' > /dev/null
+    echo 'Banco de dados central comprometido. 10 votos injetados com sucesso.'
+  else
+    echo 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
+  fi
 }
 ${command}
 `;
@@ -698,10 +744,14 @@ traditionalRouter.put(
         };
       });
 
-      election.title = normalizedTitle;
-      election.candidates = normalizedCandidates;
-      election.updatedAt = now();
-      traditionalStore.save();
+      const db = traditionalStore.all();
+      const dbElection = db.elections.find(e => e.id === election.id);
+      if (dbElection) {
+        dbElection.title = normalizedTitle;
+        dbElection.candidates = normalizedCandidates;
+        dbElection.updatedAt = now();
+        traditionalStore.save(db);
+      }
       emitVisualEvent("ballot_saved", "votifalho", {
         options: normalizedCandidates.length
       });
@@ -733,8 +783,9 @@ traditionalRouter.post(
         createdAt: now()
       };
 
-      traditionalStore.all().voters.push(voter);
-      traditionalStore.save();
+      const db = traditionalStore.all();
+      db.voters.push(voter);
+      traditionalStore.save(db);
       emitVisualEvent("voter_registration", "votifalho");
 
       res.status(201).json({
@@ -798,9 +849,11 @@ traditionalRouter.post("/elections/:electionId/votes", requireAuth, (req, res, n
       createdAt
     };
 
-    traditionalStore.all().votes.push(vote);
-    traditionalStore.save();
+    const db = traditionalStore.all();
+    db.votes.push(vote);
+    traditionalStore.save(db);
     emitVisualEvent("vote_cast", "votifalho");
+    setTimeout(() => emitVisualEvent("vote_confirmed", "votifalho"), 3000);
 
     res.status(201).json({
       data: {
@@ -842,6 +895,11 @@ traditionalRouter.get("/elections/:electionId/votes/:txid/receipt", requireAuth,
       }
     });
   } catch (error) {
+    if (req.query.visual === "1") {
+      emitVisualEvent("receipt_rejected", "votifalho", {
+        reason: "Comprovante não encontrado"
+      });
+    }
     next(error);
   }
 });
@@ -867,17 +925,16 @@ traditionalRouter.post("/maintenance/change-vote", (req, res, next) => {
     validateChoiceExists(election, toChoice);
 
     const before = buildTraditionalAudit(election.id);
-    const vote = traditionalStore
-      .all()
-      .votes.find((item) => item.electionId === election.id && item.choice === fromChoice);
+    const db = traditionalStore.all();
+    const voteRef = db.votes.find((item) => item.electionId === election.id && item.choice === fromChoice);
 
-    if (!vote) {
+    if (!voteRef) {
       throw new HttpError(404, "ATTACK_TARGET_NOT_FOUND", "Nenhum voto de origem foi encontrado para alterar.");
     }
 
-    vote.choice = toChoice;
-    vote.receiptHash = fakeReceiptHash(vote.txid, vote.choice, vote.createdAt);
-    traditionalStore.save();
+    voteRef.choice = toChoice;
+    voteRef.receiptHash = fakeReceiptHash(voteRef.txid, voteRef.choice, voteRef.createdAt);
+    traditionalStore.save(db);
     emitVisualEvent("vote_change_attempt", "votifalho", {
       accepted: true
     });
@@ -888,7 +945,7 @@ traditionalRouter.post("/maintenance/change-vote", (req, res, next) => {
         attack: "change_vote",
         status: "accepted",
         message: "O voto foi alterado diretamente no banco centralizado.",
-        modifiedTxid: vote.txid,
+        modifiedTxid: voteRef.txid,
         before,
         after: buildTraditionalAudit(election.id)
       }
@@ -901,12 +958,12 @@ traditionalRouter.post("/maintenance/change-vote", (req, res, next) => {
 traditionalRouter.post("/maintenance/node-command", async (req, res, next) => {
   try {
     const { electionId, command } = parseNodeCommandPayload(req.body);
-    if (command || !command) {
+    const parsed = parseNodeCommand(command);
+    if (parsed.type === "unrecognized") {
       getTraditionalElectionOrThrow(electionId);
       res.json({ data: await runTerminalCommand("votifalho", electionId, command) });
       return;
     }
-    const parsed = parseNodeCommand(command);
     const election = getTraditionalElectionOrThrow(electionId);
 
     if (parsed.type === "help") {
@@ -935,32 +992,64 @@ traditionalRouter.post("/maintenance/node-command", async (req, res, next) => {
       return;
     }
 
-    validateChoiceExists(election, parsed.fromChoice);
-    validateChoiceExists(election, parsed.toChoice);
-
-    const before = buildTraditionalAudit(election.id);
-    const vote = traditionalStore
-      .all()
-      .votes.find((item) => item.electionId === election.id && item.choice === parsed.fromChoice);
-
-    if (!vote) {
-      throw new HttpError(404, "NODE_COMMAND_TARGET_NOT_FOUND", "Nenhum voto de origem foi encontrado para alterar.");
+    if (parsed.type === "compromise_db") {
+      const choice = election.candidates[0]?.number ?? "1";
+      const db = traditionalStore.all();
+      
+      for (let i = 0; i < 10; i++) {
+        db.votes.push({
+          id: randomUUID(),
+          electionId: election.id,
+          txid: randomUUID(),
+          choice,
+          voterId: randomUUID(),
+          privateKeySimulation: null,
+          receiptHash: "FAKE_HASH_COMPROMISED",
+          createdAt: now()
+        });
+      }
+      
+      traditionalStore.save(db);
+      
+      res.json({
+        data: {
+          system: "votifalho",
+          command,
+          status: "accepted",
+          message: "10 votos foram injetados diretamente no banco centralizado."
+        }
+      });
+      return;
     }
 
-    vote.choice = parsed.toChoice;
-    vote.receiptHash = fakeReceiptHash(vote.txid, vote.choice, vote.createdAt);
-    traditionalStore.save();
+    if (parsed.type === "change_vote") {
+      validateChoiceExists(election, parsed.fromChoice);
+      validateChoiceExists(election, parsed.toChoice);
 
-    res.json({
-      data: {
-        system: "votifalho",
-        command,
-        status: "accepted",
-        message: "O comando alterou o voto diretamente no banco centralizado.",
-        before,
-        after: buildTraditionalAudit(election.id)
+      const before = buildTraditionalAudit(election.id);
+      const db = traditionalStore.all();
+      const voteRef = db.votes.find((item) => item.electionId === election.id && item.choice === parsed.fromChoice);
+
+      if (!voteRef) {
+        throw new HttpError(404, "NODE_COMMAND_TARGET_NOT_FOUND", "Nenhum voto de origem foi encontrado para alterar.");
       }
-    });
+
+      voteRef.choice = parsed.toChoice;
+      voteRef.receiptHash = fakeReceiptHash(voteRef.txid, voteRef.choice, voteRef.createdAt);
+      traditionalStore.save(db);
+
+      res.json({
+        data: {
+          system: "votifalho",
+          command,
+          status: "accepted",
+          message: "O comando alterou o voto diretamente no banco centralizado.",
+          before,
+          after: buildTraditionalAudit(election.id)
+        }
+      });
+      return;
+    }
   } catch (error) {
     next(error);
   }
@@ -1359,6 +1448,7 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
     store.all().receipts.push(receipt);
     store.save();
     emitVisualEvent("vote_cast", "votify");
+    setTimeout(() => emitVisualEvent("vote_confirmed", "votify"), 3000);
 
     res.status(201).json({
       data: {
@@ -1387,6 +1477,11 @@ router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req
     }
     res.json({ data: receipt });
   } catch (error) {
+    if (req.query.visual === "1") {
+      emitVisualEvent("receipt_rejected", "votify", {
+        reason: "Comprovante não encontrado ou hash inválido"
+      });
+    }
     next(error);
   }
 });
@@ -1601,12 +1696,12 @@ router.post("/maintenance/change-vote", async (req, res, next) => {
 router.post("/maintenance/node-command", async (req, res, next) => {
   try {
     const { electionId, command } = parseNodeCommandPayload(req.body);
-    if (command || !command) {
+    const parsed = parseNodeCommand(command);
+    if (parsed.type === "unrecognized") {
       getElectionOrThrow(electionId);
       res.json({ data: await runTerminalCommand("votify", electionId, command) });
       return;
     }
-    const parsed = parseNodeCommand(command);
     const election = getElectionOrThrow(electionId);
 
     if (parsed.type === "help") {
@@ -1638,50 +1733,54 @@ router.post("/maintenance/node-command", async (req, res, next) => {
       return;
     }
 
-    validateChoiceExists(election, parsed.fromChoice);
-    validateChoiceExists(election, parsed.toChoice);
+    if (parsed.type === "change_vote") {
+      validateChoiceExists(election, parsed.fromChoice);
+      validateChoiceExists(election, parsed.toChoice);
 
-    const before = await blockchain.audit(election.chainElectionId);
-    const targetReceipt = store
-      .all()
-      .receipts.find(
-        (receipt) => receipt.electionId === election.id && receipt.choice === parsed.fromChoice && receipt.voterAddress
-      );
+      const before = await blockchain.audit(election.chainElectionId);
+      const targetReceipt = store
+        .all()
+        .receipts.find(
+          (receipt) => receipt.electionId === election.id && receipt.choice === parsed.fromChoice && receipt.voterAddress
+        );
 
-    if (!targetReceipt?.voterAddress) {
-      throw new HttpError(
-        404,
-        "NODE_COMMAND_TARGET_NOT_FOUND",
-        "Nenhum voto de origem rastreável foi encontrado para tentar alterar."
-      );
+      if (!targetReceipt?.voterAddress) {
+        throw new HttpError(
+          404,
+          "NODE_COMMAND_TARGET_NOT_FOUND",
+          "Nenhum voto de origem rastreável foi encontrado para tentar alterar."
+        );
+      }
+
+      try {
+        await blockchain.castVote(election.chainElectionId, parsed.toChoice, targetReceipt.voterAddress);
+        const after = await blockchain.audit(election.chainElectionId);
+        res.json({
+          data: {
+            system: "votify",
+            command,
+            status: "accepted",
+            message: "O comando tentou forçar uma alteração de voto no nó remoto.",
+            before,
+            after
+          }
+        });
+      } catch (error) {
+        res.json({
+          data: {
+            system: "votify",
+            command,
+            status: "blocked",
+            message: "O nó remoto falhou ao processar a requisição de ataque ou a blockchain não permitiu.",
+            stderr: error instanceof HttpError && error.details ? error.details : error instanceof Error ? error.message : "Blockchain rejeitou transação.",
+            exitCode: 1
+          }
+        });
+      }
+      return;
     }
 
-    try {
-      await blockchain.castVote(election.chainElectionId, parsed.toChoice, targetReceipt.voterAddress);
-      const after = await blockchain.audit(election.chainElectionId);
-      res.json({
-        data: {
-          system: "votify",
-          command,
-          status: "accepted",
-          message: "O comando criou uma nova transação. Verifique a auditoria da blockchain.",
-          before,
-          after
-        }
-      });
-    } catch {
-      const after = await blockchain.audit(election.chainElectionId);
-      res.json({
-        data: {
-          system: "votify",
-          command,
-          status: "blocked",
-          message: "O nó recebeu o comando, mas a blockchain não permitiu alterar o voto confirmado.",
-          before,
-          after
-        }
-      });
-    }
+    res.json({ data: await runTerminalCommand("votify", electionId, command) });
   } catch (error) {
     next(error);
   }

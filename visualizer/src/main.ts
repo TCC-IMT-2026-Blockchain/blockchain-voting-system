@@ -12,7 +12,9 @@ type VisualEventType =
   | "election_lock_rejected"
   | "vote_cast"
   | "vote_rejected"
+  | "vote_confirmed"
   | "receipt_verified"
+  | "receipt_rejected"
   | "audit_recalculated"
   | "vote_change_attempt"
   | "consensus_checked"
@@ -39,6 +41,7 @@ type FlowDefinition = {
   steps: FlowStep[];
   failureStepIndex?: number;
 };
+
 
 type IconName =
   | "app"
@@ -146,7 +149,14 @@ const flows: Record<VisualEventType, FlowDefinition> = {
       { label: "API", detail: "Localiza eleitor", icon: "api" },
       { label: "Credencial", detail: "Token verificado", icon: "token" },
       { label: "Blockchain", detail: "Regra rejeita transação", icon: "warning" },
-      { label: "Urna", detail: "Nenhum voto é gravado", icon: "stream" }
+      { label: "Urna", detail: "Nenhum voto gravado", icon: "stream" }
+    ]
+  },
+  vote_confirmed: {
+    title: "Voto confirmado",
+    steps: [
+      { label: "Bloco", detail: "Inclusão confirmada", icon: "block" },
+      { label: "Nós", detail: "Consenso atingido", icon: "nodes" }
     ]
   },
   receipt_verified: {
@@ -157,6 +167,15 @@ const flows: Record<VisualEventType, FlowDefinition> = {
       { label: "Bloco", detail: "Localiza inclusão", icon: "block" },
       { label: "Confirmações", detail: "Idade do registro", icon: "chain" },
       { label: "Hash", detail: "Conferência local", icon: "hash" }
+    ]
+  },
+  receipt_rejected: {
+    title: "Comprovante inválido",
+    failureStepIndex: 1,
+    steps: [
+      { label: "TXID", detail: "Comprovante informado", icon: "receipt" },
+      { label: "Urna", detail: "Não encontrado na rede", icon: "warning" },
+      { label: "Blockchain", detail: "Falha na verificação", icon: "warning" }
     ]
   },
   audit_recalculated: {
@@ -248,7 +267,9 @@ const eventNames: Record<VisualEventType, string> = {
   election_lock_rejected: "Trava não aplicada",
   vote_cast: "Voto enviado",
   vote_rejected: "Voto bloqueado",
+  vote_confirmed: "Voto confirmado",
   receipt_verified: "Comprovante verificado",
+  receipt_rejected: "Comprovante inválido",
   audit_recalculated: "Auditoria recalculada",
   vote_change_attempt: "Tentativa de alteração",
   consensus_checked: "Consenso conferido",
@@ -256,6 +277,7 @@ const eventNames: Record<VisualEventType, string> = {
   node_offline: "Nó offline",
   node_restored: "Nó restaurado"
 };
+
 
 let activeStep = -1;
 let completedSteps = 0;
@@ -291,19 +313,20 @@ function icon(name: IconName) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name]}</svg>`;
 }
 
+
 function eventSystemLabel(system: VisualSystem) {
   return system === "votifalho" ? "Votifalho" : "Votify";
 }
 
-function isFailureEvent(event: VisualEvent | null | undefined) {
-  return Boolean(
-    event &&
-      (event.type === "vote_rejected" ||
-        event.type === "election_lock_rejected" ||
-        event.type === "node_compromised" ||
-        event.type === "node_offline" ||
-        (event.type === "vote_change_attempt" && event.metadata?.accepted === false))
-  );
+function isFailureEvent(event: VisualEvent | null) {
+  if (!event) return false;
+  if (event.type === "vote_rejected") return true;
+  if (event.type === "election_lock_rejected") return true;
+  if (event.type === "receipt_rejected") return true;
+  if (event.type === "node_compromised") return true;
+  if (event.type === "node_offline") return true;
+  if (event.type === "vote_change_attempt" && event.metadata?.accepted === false) return true;
+  return false;
 }
 
 function flowForEvent(event: VisualEvent) {
@@ -313,6 +336,27 @@ function flowForEvent(event: VisualEvent) {
 
   if (event.type === "vote_change_attempt" && event.metadata?.accepted === true) {
     return acceptedAttackFlow;
+  }
+
+  if (event.type === "receipt_rejected") {
+    return flows.receipt_rejected;
+  }
+
+  if (event.type === "vote_rejected") {
+    if (event.metadata?.reason === "BLOCKCHAIN_COMMAND_FAILED") {
+      return flows.vote_rejected; // Defaults to index 3 (Blockchain level)
+    }
+    return {
+      title: "Voto bloqueado",
+      failureStepIndex: 1,
+      steps: [
+        { label: "Chave privada", detail: "Prova enviada", icon: "lock" },
+        { label: "API", detail: "Validação falhou", icon: "api" },
+        { label: "Credencial", detail: "Bloqueado", icon: "token" },
+        { label: "Blockchain", detail: "Acesso negado", icon: "warning" },
+        { label: "Urna", detail: "Nenhum voto gravado", icon: "stream" }
+      ]
+    } as FlowDefinition;
   }
 
   return flows[event.type];
@@ -341,10 +385,22 @@ function formatTime(value: string) {
 function renderStep(step: FlowStep, index: number) {
   const failureIndex = currentFlow.failureStepIndex ?? currentFlow.steps.length - 1;
   const isErrorStep = isFailureEvent(currentEvent) && index === failureIndex;
+  const isSuccessStep =
+    currentEvent?.type === "vote_confirmed" ||
+    currentEvent?.type === "receipt_verified" ||
+    currentEvent?.type === "voter_registration" ||
+    currentEvent?.type === "ballot_saved" ||
+    currentEvent?.type === "election_locked" ||
+    currentEvent?.type === "audit_recalculated" ||
+    currentEvent?.type === "consensus_checked" ||
+    currentEvent?.type === "node_restored" ||
+    currentEvent?.type === "node_offline" ||
+    currentEvent?.type === "node_compromised";
+  const isLastStep = index === currentFlow.steps.length - 1;
   const stateClass = [
     index === activeStep ? "active" : "",
-    index < completedSteps ? "done" : "",
-    isErrorStep && index <= completedSteps ? "error" : ""
+    isErrorStep && index === failureIndex && index < completedSteps ? "error" : "",
+    isSuccessStep && isLastStep && index < completedSteps ? "success" : ""
   ]
     .filter(Boolean)
     .join(" ");
@@ -474,6 +530,7 @@ function connect() {
   eventSource = source;
 
   source.addEventListener("connected", (message) => {
+
     const payload = JSON.parse((message as MessageEvent).data) as { history?: VisualEvent[] };
     const serverHistory = (payload.history ?? []).filter((event) => event.system === "votify");
     serverHistory.forEach((event) => rememberEventId(event.id));
@@ -482,12 +539,18 @@ function connect() {
   });
 
   source.addEventListener("visual_event", (message) => {
+
     const event = JSON.parse((message as MessageEvent).data) as VisualEvent;
     enqueue(event);
   });
 
-  source.addEventListener("heartbeat", () => undefined);
-  source.onerror = () => undefined;
+  source.addEventListener("heartbeat", () => {
+    render();
+  });
+
+  source.onerror = () => {
+    render();
+  };
 }
 
 render();

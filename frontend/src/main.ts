@@ -1,9 +1,10 @@
 import "./styles.css";
-import logoVotifalhoUrl from "./assets/logo-votifalho.png";
 import logoVotifyUrl from "./assets/logo-votify.png";
+import logoVotifalhoUrl from "./assets/logo-votifalho.png";
+import faviconVotifyUrl from "./assets/votify_logo.png";
+import faviconVotifalhoUrl from "./assets/votifalho_logo.png";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3333/api/v1";
-const POLLING_INTERVAL_MS = 3000;
 
 type RouteName = "voto" | "configuracao" | "auditoria" | "admin";
 type SystemMode = "votify" | "votifalho";
@@ -112,6 +113,7 @@ type NodeCommandResult = {
 type DemoVoter = {
   cpf: string;
   privateKey: string;
+  electionId?: string;
 };
 
 const DEMO_VOTERS_STORAGE_KEY = "votify_demo_voters";
@@ -338,6 +340,13 @@ async function switchMode(mode: SystemMode) {
 
   localStorage.setItem(SYSTEM_MODE_STORAGE_KEY, mode);
   resetRuntimeStateForMode(mode);
+  
+  document.title = mode === "votifalho" ? "Votifalho" : "Votify";
+  const faviconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+  if (faviconLink) {
+    faviconLink.href = mode === "votifalho" ? faviconVotifalhoUrl : faviconVotifyUrl;
+  }
+  
   render();
   await initialize();
 }
@@ -353,6 +362,11 @@ async function initialize() {
       headers: { Authorization: `Bearer ${state.electorToken}` }
     });
     state.election = elections.data[0] ?? null;
+    if (state.election) {
+      state.demoVoters = state.demoVoters.filter(v => v.electionId === state.election!.id);
+      saveDemoVoters(state.mode, state.demoVoters);
+    }
+
     syncBallotDraft();
     normalizeSelectedChoice();
     normalizeAttackChoices();
@@ -375,17 +389,23 @@ async function registerVoter() {
   if (!state.election || isElectionLocked()) return;
 
   await withBusy(async () => {
+    const cpfToSave = state.configCpf;
+    const pkToSave = state.configPrivateKey;
     const publicKey = await generatePublicKey();
     await api(`/admin/elections/${state.election!.id}/voters`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.adminToken}` },
       body: JSON.stringify({
-        cpf: state.configCpf,
+        cpf: cpfToSave,
         publicKey
       })
     });
 
-    const voter = { cpf: state.configCpf, privateKey: state.configPrivateKey };
+
+    state.configCpf = "";
+    state.configPrivateKey = "";
+    
+    const voter = { cpf: cpfToSave, privateKey: pkToSave, electionId: state.election!.id };
     state.demoVoters = addDemoVoterToMode(state.mode, voter);
     if (state.mode === "votify") {
       addDemoVoterToMode("votifalho", voter);
@@ -465,7 +485,14 @@ async function refreshReceipt() {
       headers: { Authorization: `Bearer ${state.electorToken}` }
     }
   );
+  
+  const wasOptimistic = state.receipt?.status === "confirmed" && result.data.status !== "confirmed";
   state.receipt = result.data;
+  
+  if (wasOptimistic) {
+    state.receipt.status = "confirmed";
+    state.receipt.confirmations = Math.max(1, state.receipt.confirmations ?? 0);
+  }
 }
 
 async function refreshAuditAndStatus(visual = false) {
@@ -496,6 +523,7 @@ async function refreshRouteData() {
     try {
       await refreshAuditAndStatus();
       normalizeAttackChoices();
+      state.error = "";
       render();
     } catch (error) {
       state.error = error instanceof Error ? error.message : "Erro inesperado.";
@@ -506,18 +534,27 @@ async function refreshRouteData() {
 
 async function pollCurrentRoute() {
   const currentRoute = route();
-  if (!state.initialized || state.busy || polling) return;
+  if (!state.initialized || polling) return;
+
+  if (state.busy) {
+    if (currentRoute === "voto" && state.txid) {
+      setTimeout(() => void pollCurrentRoute(), 1000);
+    }
+    return;
+  }
 
   polling = true;
   try {
     if (currentRoute === "auditoria" || currentRoute === "admin") {
       await refreshAuditAndStatus();
+      state.error = "";
       render();
       return;
     }
 
     if (currentRoute === "voto" && state.txid) {
       await refreshReceipt();
+      state.error = "";
       render();
     }
   } catch (error) {
@@ -525,6 +562,13 @@ async function pollCurrentRoute() {
     render();
   } finally {
     polling = false;
+    
+    // Always reschedule if we are still on a polling route
+    if (route() === "voto" && state.txid) {
+      setTimeout(() => {
+        if (route() === "voto") void pollCurrentRoute();
+      }, 3000);
+    }
   }
 }
 
@@ -599,6 +643,24 @@ async function executeNodeCommand() {
       body: JSON.stringify({
         electionId: state.election!.id,
         command: state.nodeCommand.trim()
+      })
+    });
+
+    state.nodeCommandResult = result.data;
+    await refreshAuditAndStatus();
+  });
+}
+
+async function executeCompromiseCentralDb() {
+  if (!state.election || state.mode !== "votifalho") return;
+
+  const choice = state.election.candidates[0]?.number ?? "1";
+  await withBusy(async () => {
+    const result = await api<{ data: NodeCommandResult }>("/maintenance/node-command", {
+      method: "POST",
+      body: JSON.stringify({
+        electionId: state.election!.id,
+        command: "comprometer-banco"
       })
     });
 
@@ -1273,8 +1335,23 @@ function renderAdminPage() {
               </div>
               ${renderConsensusPanel(true)}
             </article>`
-          : ""
+          : `<article class="panel admin-node-panel">
+              <div class="panel-title">
+                <h2>Simulação de Ataque</h2>
+              </div>
+              <div class="node-actions" style="margin-top: 1rem; display: flex; gap: 1rem;">
+                <button id="btnCompromiseDb" class="danger">Comprometer Banco</button>
+                <button id="btnDropDb" class="danger">Derrubar Banco</button>
+              </div>
+            </article>`
       }
+
+      <article class="panel admin-count">
+        <div class="panel-title">
+          <h2>Contagem atual</h2>
+        </div>
+        ${state.audit ? renderVoteResults() : `<div class="empty-box"></div>`}
+      </article>
 
     </section>
   `;
@@ -1440,6 +1517,15 @@ function bindCommonEvents() {
       void switchMode(nextMode);
     }
   });
+
+  document.querySelector<HTMLButtonElement>("#btnDropDb")?.addEventListener("click", () => {
+    state.nodeCommand = "derrubar-banco";
+    void executeNodeCommand();
+  });
+
+  document.querySelector<HTMLButtonElement>("#btnCompromiseDb")?.addEventListener("click", () => {
+    void executeCompromiseCentralDb();
+  });
 }
 
 function render() {
@@ -1482,6 +1568,42 @@ document.addEventListener("click", (event) => {
   void refreshRouteData();
 });
 
+function connectSSE() {
+  const source = new EventSource(`${API_BASE}/visual/events`);
+
+  source.addEventListener("connected", () => {
+    // Apenas log de conexão ou state update se necessário
+  });
+
+  source.addEventListener("visual_event", (message) => {
+    const event = JSON.parse((message as MessageEvent).data);
+    const refreshEvents = ["vote_cast", "voter_registration", "election_locked", "audit_recalculated", "vote_change_attempt", "ballot_saved"];
+    
+    if (event.type === "vote_confirmed" && state.receipt && state.txid) {
+      state.receipt.status = "confirmed";
+      state.receipt.confirmations = Math.max(1, state.receipt.confirmations ?? 1);
+      render();
+      void pollCurrentRoute();
+    } else if (refreshEvents.includes(event.type)) {
+      void pollCurrentRoute();
+    }
+  });
+
+  source.addEventListener("heartbeat", () => {
+    // Mantém a conexão viva
+  });
+
+  source.onerror = () => {
+    // Lida com erros se houver, o navegador tenta reconectar sozinho
+  };
+}
+
+document.title = state.mode === "votifalho" ? "Votifalho" : "Votify";
+const initialFaviconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+if (initialFaviconLink) {
+  initialFaviconLink.href = state.mode === "votifalho" ? faviconVotifalhoUrl : faviconVotifyUrl;
+}
+
 render();
 void initialize();
-window.setInterval(() => void pollCurrentRoute(), POLLING_INTERVAL_MS);
+connectSSE();

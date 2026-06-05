@@ -60,24 +60,27 @@ function seedDatabase(): TraditionalDatabase {
 }
 
 export class TraditionalStore {
-  private db: TraditionalDatabase;
-
   constructor() {
     fs.mkdirSync(dataDir, { recursive: true });
     if (!fs.existsSync(dbPath)) {
-      this.db = seedDatabase();
-      this.save();
-    } else {
-      this.db = JSON.parse(fs.readFileSync(dbPath, "utf8")) as TraditionalDatabase;
+      this.save(seedDatabase());
     }
   }
 
-  all() {
-    return this.db;
+  all(): TraditionalDatabase {
+    if (!fs.existsSync(dbPath)) {
+      return { elections: [], voters: [], votes: [] };
+    }
+    try {
+      return JSON.parse(fs.readFileSync(dbPath, "utf8")) as TraditionalDatabase;
+    } catch {
+      return { elections: [], voters: [], votes: [] };
+    }
   }
 
-  save() {
-    fs.writeFileSync(dbPath, JSON.stringify(this.db, null, 2), "utf8");
+  save(data?: TraditionalDatabase) {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(dbPath, JSON.stringify(data ?? this.all(), null, 2), "utf8");
   }
 }
 

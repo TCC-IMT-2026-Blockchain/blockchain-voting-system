@@ -30,6 +30,14 @@ function publicBlockchainMessage(raw: string) {
     return `Voto rejeitado pela blockchain: ${rejection[1].trim()}`;
   }
 
+  if (text.includes("Asset not found")) {
+    return "Ativo da eleição não configurado na blockchain. Execute o setup novamente.";
+  }
+
+  if (text.includes("nenhum item da stream") || text.includes("Stream with this name not found")) {
+    return "Comprovante não encontrado na blockchain.";
+  }
+
   return "Falha ao executar comando na blockchain.";
 }
 

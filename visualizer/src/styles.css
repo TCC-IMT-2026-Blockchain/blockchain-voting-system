@@ -212,6 +212,17 @@ h2 {
   color: #fffef9;
 }
 
+.flow-step.success {
+  border-color: #15803d;
+  background: #dcfce7;
+  box-shadow: inset 5px 0 0 #15803d;
+}
+
+.flow-step.success .step-icon {
+  background: #15803d;
+  color: #fffef9;
+}
+
 .step-icon {
   align-items: center;
   border: 1px solid var(--ink);

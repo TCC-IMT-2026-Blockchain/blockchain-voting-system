@@ -1,18 +1,60 @@
 {
   "elections": [
     {
-      "id": "3578d021-9614-4593-8705-4a076e5535f8",
+      "id": "6d48dc32-13e4-418c-bd6e-433b1e724956",
       "chainElectionId": "BANCO_TRADICIONAL_001",
       "title": "Votação",
-      "description": "Votação usada para demonstrar fragilidades de uma arquitetura centralizada.",
+      "description": "Votação usada para demonstrar o fluxo completo do Votify.",
       "status": "OPEN",
-      "startsAt": "2026-06-04T22:34:47.910Z",
-      "endsAt": "2026-06-11T22:34:47.910Z",
-      "candidates": [],
-      "createdAt": "2026-06-04T22:34:47.910Z",
-      "updatedAt": "2026-06-04T22:34:47.910Z"
+      "startsAt": "2026-06-05T01:58:42.688Z",
+      "endsAt": "2026-06-12T01:58:42.689Z",
+      "candidates": [
+        {
+          "id": "a21b5181-a6a4-409d-b2e5-373eef1d175e",
+          "electionId": "6d48dc32-13e4-418c-bd6e-433b1e724956",
+          "name": "lEO",
+          "number": "1",
+          "description": null
+        },
+        {
+          "id": "15b0a5ff-2937-4a0d-8e6b-c544c01507dd",
+          "electionId": "6d48dc32-13e4-418c-bd6e-433b1e724956",
+          "name": "Te",
+          "number": "2",
+          "description": null
+        }
+      ],
+      "createdAt": "2026-06-05T01:58:42.691Z",
+      "updatedAt": "2026-06-05T02:02:56.846Z"
     }
   ],
-  "voters": [],
-  "votes": []
+  "voters": [
+    {
+      "id": "8cf0aa64-4625-4bb4-be7e-5ccc5b2a19ff",
+      "electionId": "6d48dc32-13e4-418c-bd6e-433b1e724956",
+      "cpf": "967.077.920-66",
+      "publicKey": "pub_d29d53701d3c859e29e1b90028eec1ca8e2f29439198b6e036c60951fb458aa1",
+      "createdAt": "2026-06-05T01:59:10.782Z"
+    },
+    {
+      "id": "249ff35f-e153-47c6-be7c-6510ebe9c3ee",
+      "electionId": "6d48dc32-13e4-418c-bd6e-433b1e724956",
+      "cpf": "645.468.032-59",
+      "publicKey": "pub_c32ffef1ae0cabc0576614cb4d2064cea5bd9c0fa13c7b8bb9fb9b4e8ba950a9",
+      "createdAt": "2026-06-05T02:02:54.653Z"
+    }
+  ],
+  "votes": [
+    {
+      "id": "6287ffbb-8832-429d-86c0-7c55c856341b",
+      "electionId": "6d48dc32-13e4-418c-bd6e-433b1e724956",
+      "choice": "2",
+      "voterId": "249ff35f-e153-47c6-be7c-6510ebe9c3ee",
+      "publicKey": "pub_c32ffef1ae0cabc0576614cb4d2064cea5bd9c0fa13c7b8bb9fb9b4e8ba950a9",
+      "privateKeySimulation": "525",
+      "txid": "e10d71a76ec9446c85fe76dbbba9a631",
+      "receiptHash": "3edf5ce7198a59443f3eea0ad60c3710c9e1c238646d5c7a6e22c24e14fdafc8",
+      "createdAt": "2026-06-05T02:03:01.999Z"
+    }
+  ]
 }
