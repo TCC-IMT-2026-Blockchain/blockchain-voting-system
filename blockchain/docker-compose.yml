@@ -13,7 +13,7 @@ services:
     command: >
       /bin/bash -c "
       multichain-util create votifychain -default-rpc-port=7447 -default-p2p-port=7445 || true && 
-      multichaind votifychain -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      multichaind votifychain -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0 -sendfiltertimeout=5000 -acceptfiltertimeout=5000
       "
 
   slave-node:
@@ -30,7 +30,7 @@ services:
     command: >
       /bin/bash -c "
       sleep 5 &&
-      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0 -gen=1 -sendfiltertimeout=5000 -acceptfiltertimeout=5000
       "
 
   fiscal-2-node:
@@ -47,8 +47,21 @@ services:
     command: >
       /bin/bash -c "
       sleep 5 &&
-      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0
+      multichaind votifychain@172.20.0.2:7445 -port=7445 -rpcport=7447 -printtoconsole -rpcallowip=0.0.0.0/0 -gen=1 -sendfiltertimeout=5000 -acceptfiltertimeout=5000
       "
+
+  votify-vault:
+    image: hashicorp/vault:latest
+    container_name: votify-vault
+    networks:
+      votify-net:
+        ipv4_address: 172.20.0.5
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "votify-tcc-token"
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "8200:8200"
+
 
 networks:
   votify-net:

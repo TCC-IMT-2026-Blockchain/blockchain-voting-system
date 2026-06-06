@@ -106,7 +106,7 @@ python .\scripts\votify.py audit --election-id "ELEICAO_001" --output "audit-ELE
 ## Autorizar endereço ou nó fiscal
 
 ```powershell
-python .\scripts\votify.py grant-address --address "ENDERECO" --permissions "connect,send,receive"
+python .\scripts\votify.py grant-address --address "ENDERECO" --permissions "connect,send,receive,mine"
 ```
 
 ## Autorizar o Slave Node automaticamente

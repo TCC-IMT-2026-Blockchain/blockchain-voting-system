@@ -38,48 +38,72 @@ function publicBlockchainMessage(raw: string) {
     return "Comprovante não encontrado na blockchain.";
   }
 
-  return "Falha ao executar comando na blockchain.";
+  if (text.includes("from-address is not found")) {
+    return "O nó atual não possui a chave privada deste eleitor. A carteira custodial original deve estar offline.";
+  }
+
+  return `Falha ao executar comando na blockchain: ${raw}`;
 }
 
-function runBlockchain(args: string[]): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "python",
-      ["scripts/votify.py", ...args],
-      {
-        cwd: env.blockchainDir,
-        shell: false,
-        timeout: 60_000,
-        windowsHide: true
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const details = (stderr || stdout || error.message).trim();
-          reject(
-            new HttpError(
-              503,
-              "BLOCKCHAIN_COMMAND_FAILED",
-              publicBlockchainMessage(details),
-              details
-            )
-          );
-          return;
-        }
+const FALLBACK_NODES = ["votify-master", "votify-slave", "votify-fiscal-2"];
 
-        const output = stdout.trim();
-        if (!output) {
-          resolve(null);
-          return;
-        }
+async function runBlockchain(args: string[]): Promise<unknown> {
+  const hasExplicitMaster = args.includes("--master");
+  const nodesToTry = hasExplicitMaster ? [null] : FALLBACK_NODES;
 
-        try {
-          resolve(JSON.parse(output));
-        } catch {
-          resolve(output);
-        }
+  let lastError: Error | null = null;
+
+  for (const node of nodesToTry) {
+    const finalArgs = node && !hasExplicitMaster ? [...args, "--master", node] : args;
+
+    try {
+      return await new Promise((resolve, reject) => {
+        execFile(
+          "python",
+          ["scripts/votify.py", ...finalArgs],
+          {
+            cwd: env.blockchainDir,
+            shell: false,
+            timeout: 60_000,
+            windowsHide: true
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              const details = (stderr || stdout || error.message).trim();
+              reject(
+                new HttpError(
+                  503,
+                  "BLOCKCHAIN_COMMAND_FAILED",
+                  publicBlockchainMessage(details),
+                  details
+                )
+              );
+              return;
+            }
+
+            const output = stdout.trim();
+            if (!output) {
+              resolve(null);
+              return;
+            }
+
+            try {
+              resolve(JSON.parse(output));
+            } catch {
+              resolve(output);
+            }
+          }
+        );
+      });
+    } catch (err: any) {
+      lastError = err;
+      if (err instanceof HttpError && !err.message.startsWith("Falha ao executar comando na blockchain")) {
+        throw err;
       }
-    );
-  });
+    }
+  }
+
+  throw lastError;
 }
 
 function runDocker(args: string[]): Promise<string> {
@@ -129,25 +153,73 @@ export const blockchain = {
     ]) as Promise<string>;
   },
 
-  registerVoter(electionId: string, voterIdHash: string, publicKey: string) {
-    return runBlockchain([
+  async registerVoter(electionId: string, voterIdHash: string) {
+    // 1. Generate keys via KMS
+    let kmsResponse: Response;
+    try {
+      kmsResponse = await fetch("http://127.0.0.1:4444/api/v1/keys/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voterIdHash })
+      });
+    } catch (err) {
+      throw new HttpError(503, "KMS_UNAVAILABLE", "O microsserviço KMS (porta 4444) não está respondendo. Verifique se ele está rodando.", "KMS connection failed");
+    }
+    if (!kmsResponse.ok) {
+      const err = await kmsResponse.json().catch(() => ({}));
+      throw new Error("KMS Error: " + (err.error || "Failed to generate keys"));
+    }
+    const kmsData = await kmsResponse.json() as { address: string, pubKey: string, pin: string };
+
+    // 2. Import address as watch-only
+    await this.importAddress(kmsData.address);
+
+    // 3. Register voter on blockchain
+    const result = await runBlockchain([
       "register-voter",
       "--election-id",
       electionId,
       "--voter-id-hash",
       voterIdHash,
       "--public-key",
-      publicKey
-    ]) as Promise<{ identity_txid: string }>;
+      kmsData.pubKey
+    ]) as { identity_txid: string };
+
+    return {
+      identity_txid: result.identity_txid,
+      address: kmsData.address,
+      pin: kmsData.pin
+    };
   },
 
-  issueCredential(electionId: string, voterIdHash: string) {
+  async importAddress(address: string) {
+    // Import address to all fallback nodes so they can track its UTXOs
+    for (const node of FALLBACK_NODES) {
+      try {
+        await new Promise((resolve, reject) => {
+          execFile(
+            "docker",
+            ["exec", node, "multichain-cli", "votifychain", "importaddress", address, "", "false"],
+            { shell: false, timeout: 10_000, windowsHide: true },
+            (err) => err ? reject(err) : resolve(null)
+          );
+        });
+      } catch (err) {
+        console.warn(`Failed to import address on ${node}`);
+      }
+    }
+  },
+
+  async issueCredential(electionId: string, voterIdHash: string, voterAddress: string) {
+    // Issue credential on blockchain
     return runBlockchain([
       "issue-credential",
       "--election-id",
       electionId,
       "--voter-id-hash",
-      voterIdHash
+      voterIdHash,
+      "--voter-address",
+      voterAddress
     ]) as Promise<{
       voter_address: string;
       token_transfer_txid: string;
@@ -155,16 +227,57 @@ export const blockchain = {
     }>;
   },
 
-  castVote(electionId: string, choice: string, voterAddress: string) {
-    return runBlockchain([
-      "cast-vote",
+  async castVote(electionId: string, choice: string, voterAddress: string, voterIdHash: string, pin: string) {
+    // 1. Create unsigned raw vote transaction
+    const createResult = await runBlockchain([
+      "create-raw-vote",
       "--election-id",
       electionId,
       "--choice",
       choice,
       "--voter-address",
       voterAddress
-    ]) as Promise<{ txid: string; burn_address: string; receipt: unknown }>;
+    ]) as { unsigned_tx_hex: string; burn_address: string };
+
+    // 2. Delegate signature to KMS
+    let kmsResponse: Response;
+    try {
+      kmsResponse = await fetch("http://127.0.0.1:4444/api/v1/keys/sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          voterIdHash,
+          pin,
+          unsignedTxHex: createResult.unsigned_tx_hex
+        })
+      });
+    } catch (err) {
+      throw new HttpError(503, "KMS_UNAVAILABLE", "O microsserviço KMS (porta 4444) não está respondendo. Verifique se ele está rodando.", "KMS connection failed");
+    }
+    
+    if (!kmsResponse.ok) {
+      if (kmsResponse.status === 401) {
+        throw new HttpError(401, "UNAUTHORIZED", "O PIN informado está incorreto.", "KMS decryption failed");
+      }
+      throw new Error("KMS Error: Failed to sign transaction");
+    }
+    
+    const kmsData = await kmsResponse.json() as { signedTxHex: string };
+
+    // 3. Broadcast signed transaction
+    const sendResult = await runBlockchain([
+      "send-raw-vote",
+      "--election-id",
+      electionId,
+      "--signed-hex",
+      kmsData.signedTxHex
+    ]) as { txid: string; receipt: unknown };
+
+    return {
+      txid: sendResult.txid,
+      receipt: sendResult.receipt,
+      burn_address: createResult.burn_address
+    };
   },
 
   receipt(electionId: string, txid: string) {

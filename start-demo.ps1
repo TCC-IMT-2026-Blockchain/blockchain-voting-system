@@ -10,6 +10,7 @@ $BlockchainDir = Join-Path $Root "blockchain"
 $BackendDir = Join-Path $Root "backend"
 $FrontendDir = Join-Path $Root "frontend"
 $VisualizerDir = Join-Path $Root "visualizer"
+$KmsDir = Join-Path $Root "kms"
 
 function Write-Step {
   param([string]$Message)
@@ -104,6 +105,7 @@ Assert-Command "npm"
 
 Write-Step "Parando servicos locais"
 Stop-Port 3333
+Stop-Port 4444
 Stop-Port 5173
 Stop-Port 5174
 
@@ -145,6 +147,9 @@ try {
   Pop-Location
 }
 
+Write-Step "Preparando KMS"
+Ensure-Dependencies $KmsDir
+
 Write-Step "Preparando frontend"
 Ensure-Dependencies $FrontendDir
 Push-Location $FrontendDir
@@ -165,14 +170,16 @@ try {
 
 Write-Step "Iniciando aplicacoes"
 Start-NpmApp -Name "backend" -Path $BackendDir -Arguments @("run", "dev")
+Start-NpmApp -Name "kms" -Path $KmsDir -Arguments @("start")
 Start-NpmApp -Name "frontend" -Path $FrontendDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0")
 Start-NpmApp -Name "visualizador" -Path $VisualizerDir -Arguments @("run", "dev", "--", "--host", "0.0.0.0", "--port", "5174")
 
 Start-Sleep -Seconds 5
 
 Write-Step "Resumo"
-Write-Host "Blockchain: containers votify-master, votify-slave e votify-fiscal-2"
+Write-Host "Blockchain: containers votify-master, votify-slave, votify-fiscal-2 e votify-vault"
 Write-Host "Backend:    http://localhost:3333/api/v1"
+Write-Host "KMS:        http://localhost:4444/api/v1"
 Write-Host "Frontend:   http://localhost:5173"
 Write-Host "Visual:     http://localhost:5174"
 Write-Host "Config:     http://localhost:5173/configuracao"

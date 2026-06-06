@@ -175,14 +175,6 @@ function getAuditNodeOrThrow(id: string) {
   return node;
 }
 
-function ensureFiscalNode(id: string) {
-  const node = getAuditNodeOrThrow(id);
-  if (node.role !== "fiscal") {
-    throw new HttpError(400, "AUDIT_NODE_NOT_CONTROLLABLE", "A demonstração só controla nós fiscais.");
-  }
-  return node;
-}
-
 function sortRecord(record: Record<string, number> = {}) {
   return Object.fromEntries(Object.entries(record).sort(([left], [right]) => left.localeCompare(right)));
 }
@@ -1232,9 +1224,9 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
     ensureElectionIsUnlocked(election);
-    const { cpf, publicKey } = req.body ?? {};
-    if (!cpf || !publicKey) {
-      throw new HttpError(400, "VOTER_INVALID_PAYLOAD", "CPF e chave pública são obrigatórios.");
+    const { cpf } = req.body ?? {};
+    if (!cpf) {
+      throw new HttpError(400, "VOTER_INVALID_PAYLOAD", "O CPF é obrigatório.");
     }
 
     const voterIdHash = await blockchain.hashCpf(cpf, election.chainElectionId);
@@ -1242,26 +1234,29 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
       throw new HttpError(409, "VOTER_ALREADY_REGISTERED", "Eleitor já cadastrado para esta eleição.");
     }
 
-    const chainResult = await blockchain.registerVoter(election.chainElectionId, voterIdHash, publicKey);
+    const chainResult = await blockchain.registerVoter(election.chainElectionId, voterIdHash);
     const voter = {
       id: randomUUID(),
       electionId: election.id,
       voterIdHash,
-      publicKey,
+      publicKey: "managed-by-kms",
+      voterAddress: chainResult.address, // Address is now generated at registration
       identityTxid: chainResult.identity_txid,
       createdAt: now()
     };
 
     store.all().voters.push(voter);
     store.save();
-    syncTraditionalVoterFromVotify(election, String(cpf), String(publicKey));
+    syncTraditionalVoterFromVotify(election, String(cpf), voter.publicKey);
     emitVisualEvent("voter_registration", "votify");
+    
     res.status(201).json({
       data: {
         id: voter.id,
         electionId: election.id,
         identityTxid: voter.identityTxid,
-        voterIdHash
+        voterIdHash,
+        pin: chainResult.pin // Important: return PIN to admin!
       }
     });
   } catch (error) {
@@ -1307,12 +1302,17 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
 
     const issuedCredentials = [];
     for (const voter of voters) {
-      if (voter.voterAddress) continue;
+      if (voter.credentialRecordTxid) continue;
 
-      const credential = await blockchain.issueCredential(election.chainElectionId, voter.voterIdHash);
+      if (!voter.voterAddress) {
+         // Should not happen with new KMS logic, but just in case
+         continue;
+      }
+
+      const credential = await blockchain.issueCredential(election.chainElectionId, voter.voterIdHash, voter.voterAddress);
       voter.credentialRecordTxid = credential.credential_record_txid;
-      voter.voterAddress = credential.voter_address;
       voter.tokenTransferTxid = credential.token_transfer_txid;
+      
       issuedCredentials.push({
         voterIdHash: voter.voterIdHash,
         voterAddress: credential.voter_address,
@@ -1347,9 +1347,9 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
 router.post("/elections/:electionId/credentials", requireAuth, async (req, res, next) => {
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-    const { cpf, privateKeySimulation } = req.body ?? {};
-    if (!cpf || !privateKeySimulation) {
-      throw new HttpError(400, "CREDENTIAL_INVALID_PAYLOAD", "CPF e chave privada são obrigatórios.");
+    const { cpf } = req.body ?? {};
+    if (!cpf) {
+      throw new HttpError(400, "CREDENTIAL_INVALID_PAYLOAD", "O CPF é obrigatório.");
     }
 
     const voterIdHash = await blockchain.hashCpf(cpf, election.chainElectionId);
@@ -1358,12 +1358,7 @@ router.post("/elections/:electionId/credentials", requireAuth, async (req, res, 
       throw new HttpError(404, "VOTER_NOT_REGISTERED", "Eleitor não cadastrado para esta eleição.");
     }
 
-    const publicKey = derivePublicKey(privateKeySimulation);
-    if (publicKey !== voter.publicKey) {
-      throw new HttpError(403, "PRIVATE_KEY_INVALID", "A chave privada não corresponde à chave pública cadastrada.");
-    }
-
-    if (!voter.voterAddress) {
+    if (!voter.credentialRecordTxid) {
       throw new HttpError(
         409,
         "CREDENTIAL_NOT_ISSUED",
@@ -1399,9 +1394,9 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
       );
     }
 
-    const { choice, privateKeySimulation } = req.body ?? {};
-    if (!choice) {
-      throw new HttpError(400, "VOTE_INVALID_PAYLOAD", "Escolha do voto é obrigatória.");
+    const { choice, cpf, pin } = req.body ?? {};
+    if (!choice || !cpf || !pin) {
+      throw new HttpError(400, "VOTE_INVALID_PAYLOAD", "Escolha do voto, CPF e PIN são obrigatórios.");
     }
 
     if (election.candidates.length === 0) {
@@ -1412,17 +1407,13 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
       throw new HttpError(400, "VOTE_CHOICE_NOT_FOUND", "A opção de voto selecionada não existe nesta eleição.");
     }
 
-    if (!privateKeySimulation) {
-      throw new HttpError(400, "VOTE_INVALID_PAYLOAD", "Chave privada é obrigatória.");
-    }
-
-    const publicKey = derivePublicKey(privateKeySimulation);
-    const voter = store.all().voters.find((item) => item.electionId === election.id && item.publicKey === publicKey);
+    const voterIdHash = await blockchain.hashCpf(cpf, election.chainElectionId);
+    const voter = store.all().voters.find((item) => item.electionId === election.id && item.voterIdHash === voterIdHash);
     if (!voter) {
       throw new HttpError(404, "VOTER_NOT_REGISTERED", "Eleitor não cadastrado para esta eleição.");
     }
 
-    if (!voter.voterAddress) {
+    if (!voter.credentialRecordTxid) {
       throw new HttpError(
         409,
         "CREDENTIAL_NOT_ISSUED",
@@ -1430,8 +1421,8 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
       );
     }
 
-    const addressForVote = voter.voterAddress;
-    const result = await blockchain.castVote(election.chainElectionId, choice, addressForVote);
+    const addressForVote = voter.voterAddress!;
+    const result = await blockchain.castVote(election.chainElectionId, choice, addressForVote, voterIdHash, pin);
     const receipt = {
       id: randomUUID(),
       electionId: election.id,
@@ -1518,7 +1509,7 @@ router.get("/elections/:electionId/audit/consensus", requireAuth, requireRole("A
 
 router.post("/admin/nodes/:nodeId/compromise-audit", requireAuth, requireRole("ADMIN"), (req, res, next) => {
   try {
-    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    const node = getAuditNodeOrThrow(routeParam(req.params.nodeId, "nodeId"));
     const electionId = typeof req.body?.electionId === "string" ? req.body.electionId : "";
     const election = electionId ? getElectionOrThrow(electionId) : store.all().elections[0];
     if (!election) {
@@ -1560,7 +1551,7 @@ router.post("/admin/nodes/:nodeId/compromise-audit", requireAuth, requireRole("A
 
 router.post("/admin/nodes/:nodeId/offline", requireAuth, requireRole("ADMIN"), async (req, res, next) => {
   try {
-    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    const node = getAuditNodeOrThrow(routeParam(req.params.nodeId, "nodeId"));
     let output: unknown = null;
     let alreadyUnavailable = false;
 
@@ -1593,7 +1584,7 @@ router.post("/admin/nodes/:nodeId/offline", requireAuth, requireRole("ADMIN"), a
 
 router.post("/admin/nodes/:nodeId/restore", requireAuth, requireRole("ADMIN"), async (req, res, next) => {
   try {
-    const node = ensureFiscalNode(routeParam(req.params.nodeId, "nodeId"));
+    const node = getAuditNodeOrThrow(routeParam(req.params.nodeId, "nodeId"));
     compromisedAuditNodes.delete(node.id);
     let output: unknown = null;
     let containerMissing = false;
@@ -1650,7 +1641,7 @@ router.post("/maintenance/change-vote", async (req, res, next) => {
     }
 
     try {
-      const forgedVote = await blockchain.castVote(election.chainElectionId, toChoice, targetReceipt.voterAddress);
+      const forgedVote = await blockchain.castVote(election.chainElectionId, toChoice, targetReceipt.voterAddress, "attack-hash", "attack-pin");
       const after = await blockchain.audit(election.chainElectionId);
 
       res.json({
@@ -1753,7 +1744,7 @@ router.post("/maintenance/node-command", async (req, res, next) => {
       }
 
       try {
-        await blockchain.castVote(election.chainElectionId, parsed.toChoice, targetReceipt.voterAddress);
+        await blockchain.castVote(election.chainElectionId, parsed.toChoice, targetReceipt.voterAddress, "attack-hash", "attack-pin");
         const after = await blockchain.audit(election.chainElectionId);
         res.json({
           data: {

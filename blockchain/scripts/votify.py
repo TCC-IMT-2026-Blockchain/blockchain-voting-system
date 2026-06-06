@@ -36,7 +36,7 @@ BALLOT_STREAM = "urna"
 URNA_STREAM_FILTER = "votify_urna_schema_v1"
 VOTE_TX_FILTER = "votify_vote_tx_v3"
 LEGACY_TX_FILTERS = ["votify_vote_tx_v1", "votify_vote_tx_v2"]
-FILTER_RUNTIME_TIMEOUT_MS = 200
+FILTER_RUNTIME_TIMEOUT_MS = 5000
 
 
 class VotifyError(RuntimeError):
@@ -88,12 +88,21 @@ def run_process(args: list[str], cwd: Path | None = None, check: bool = True) ->
         stderr=subprocess.PIPE,
     )
 
-    if check and completed.returncode != 0:
-        command = " ".join(args)
-        raise VotifyError(
-            f"Comando falhou ({completed.returncode}): {command}\n"
-            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+    if completed.returncode != 0:
+        stderr_lower = completed.stderr.lower()
+        is_infra_error = (
+            "is not running" in stderr_lower
+            or "no such container" in stderr_lower
+            or "could not connect" in stderr_lower
+            or "connection refused" in stderr_lower
+            or "error response from daemon" in stderr_lower
         )
+        if check or is_infra_error:
+            command = " ".join(args)
+            raise VotifyError(
+                f"Comando falhou ({completed.returncode}): {command}\n"
+                f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+            )
 
     return parse_cli_output(completed.stdout)
 
@@ -109,12 +118,21 @@ def run_process_text(args: list[str], cwd: Path | None = None, check: bool = Tru
         stderr=subprocess.PIPE,
     )
 
-    if check and completed.returncode != 0:
-        command = " ".join(args)
-        raise VotifyError(
-            f"Comando falhou ({completed.returncode}): {command}\n"
-            f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+    if completed.returncode != 0:
+        stderr_lower = completed.stderr.lower()
+        is_infra_error = (
+            "is not running" in stderr_lower
+            or "no such container" in stderr_lower
+            or "could not connect" in stderr_lower
+            or "connection refused" in stderr_lower
+            or "error response from daemon" in stderr_lower
         )
+        if check or is_infra_error:
+            command = " ".join(args)
+            raise VotifyError(
+                f"Comando falhou ({completed.returncode}): {command}\n"
+                f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+            )
 
     return f"{completed.stdout}\n{completed.stderr}".strip()
 
@@ -471,7 +489,7 @@ def issue_credential(
     }
 
 
-def cast_vote(mc: MultiChain, election_id: str, choice: str, voter_address: str, asset: str) -> dict[str, Any]:
+def create_raw_vote(mc: MultiChain, election_id: str, choice: str, voter_address: str, asset: str) -> dict[str, Any]:
     burn_address = get_burn_address(mc)
     grant_global(mc, burn_address, "receive")
 
@@ -493,11 +511,19 @@ def cast_vote(mc: MultiChain, election_id: str, choice: str, voter_address: str,
         }
     ]
 
-    txid = mc.cli(["createrawsendfrom", voter_address, compact_json(outputs), compact_json(data), "send"])
+    unsigned_hex = mc.cli(["createrawsendfrom", voter_address, compact_json(outputs), compact_json(data)])
+    
+    return {
+        "unsigned_tx_hex": unsigned_hex,
+        "burn_address": burn_address,
+    }
+
+
+def send_raw_vote(mc: MultiChain, signed_hex: str, election_id: str) -> dict[str, Any]:
+    txid = mc.cli(["sendrawtransaction", signed_hex])
     receipt = build_receipt(mc, txid, election_id=election_id, allow_pending=True)
     return {
         "txid": txid,
-        "burn_address": burn_address,
         "receipt": receipt,
     }
 
@@ -694,14 +720,12 @@ def cmd_up(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     mc.compose(["up", "-d", "--build"])
     wait_for_node(mc, args.timeout)
-    configure_filter_runtime(mc)
     print("network is up")
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     wait_for_node(mc, args.timeout)
-    configure_filter_runtime(mc)
 
     ensure_stream(mc, IDENTITIES_STREAM, open_to_all_writers=False)
     ensure_stream(mc, CREDENTIALS_STREAM, open_to_all_writers=False)
@@ -747,15 +771,21 @@ def cmd_issue_credential(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-def cmd_cast_vote(args: argparse.Namespace) -> None:
+def cmd_create_raw_vote(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
-    result = cast_vote(mc, args.election_id, args.choice, args.voter_address, args.asset)
+    result = create_raw_vote(mc, args.election_id, args.choice, args.voter_address, args.asset)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_send_raw_vote(args: argparse.Namespace) -> None:
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
+    result = send_raw_vote(mc, args.signed_hex, args.election_id)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_receipt(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
-    receipt = build_receipt(mc, args.txid, election_id=args.election_id)
+    receipt = build_receipt(mc, args.txid, election_id=args.election_id, allow_pending=True)
     print(json.dumps(receipt, ensure_ascii=False, indent=2))
 
 
@@ -811,7 +841,7 @@ def cmd_authorize_slave(args: argparse.Namespace) -> None:
         raise VotifyError(f"Não foi possível encontrar o endereço pendente do nó nos logs do Docker para {args.slave}")
 
     address = addresses[-1]
-    grant_global(mc, address, "connect,send,receive")
+    grant_global(mc, address, "connect,send,receive,mine")
     print(json.dumps({"slave_container": args.slave, "authorized_address": address}, indent=2))
 
 
@@ -840,6 +870,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup.set_defaults(func=cmd_setup)
 
     hash_cpf_cmd = sub.add_parser("hash-cpf", help="calculate HMAC-SHA256 voter id hash")
+    add_common(hash_cpf_cmd)
     hash_cpf_cmd.add_argument("--cpf", required=True)
     hash_cpf_cmd.add_argument("--secret", required=True)
     hash_cpf_cmd.add_argument("--election-id", required=True)
@@ -860,12 +891,18 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--force", action="store_true")
     issue.set_defaults(func=cmd_issue_credential)
 
-    vote = sub.add_parser("cast-vote", help="publish a vote and burn exactly one voting token")
-    add_common(vote)
-    vote.add_argument("--election-id", required=True)
-    vote.add_argument("--choice", required=True)
-    vote.add_argument("--voter-address", required=True)
-    vote.set_defaults(func=cmd_cast_vote)
+    create_vote = sub.add_parser("create-raw-vote", help="create unsigned raw vote transaction")
+    add_common(create_vote)
+    create_vote.add_argument("--election-id", required=True)
+    create_vote.add_argument("--choice", required=True)
+    create_vote.add_argument("--voter-address", required=True)
+    create_vote.set_defaults(func=cmd_create_raw_vote)
+
+    send_vote = sub.add_parser("send-raw-vote", help="broadcast signed raw vote transaction")
+    add_common(send_vote)
+    send_vote.add_argument("--election-id", required=True)
+    send_vote.add_argument("--signed-hex", required=True)
+    send_vote.set_defaults(func=cmd_send_raw_vote)
 
     receipt = sub.add_parser("receipt", help="build inclusion receipt for a vote txid")
     add_common(receipt)

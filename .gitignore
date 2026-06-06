@@ -3,3 +3,5 @@
 /visualizer/dist/
 
 blockchain/*-data/
+
+node_modules/

@@ -94,13 +94,18 @@ input {
 
 select {
   width: 100%;
-  height: 46px;
+  height: 44px;
+  min-height: 44px;
   border: 1px solid #bfb8a9;
   border-radius: 6px;
   background: var(--paper);
   color: var(--ink);
   margin-top: 8px;
-  padding: 10px 12px;
+  padding: 0 12px;
+}
+
+.consensus-actions select {
+  margin-top: 0;
 }
 
 input:focus,
@@ -854,7 +859,7 @@ strong.selectable:hover {
 .consensus-actions {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 18px;
 }
 

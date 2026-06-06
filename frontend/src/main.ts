@@ -112,7 +112,8 @@ type NodeCommandResult = {
 
 type DemoVoter = {
   cpf: string;
-  privateKey: string;
+  pin?: string;
+  privateKey?: string;
   electionId?: string;
 };
 
@@ -137,7 +138,7 @@ function loadDemoVoters(mode: SystemMode): DemoVoter[] {
 
     return voters.filter(
       (voter): voter is DemoVoter =>
-        typeof voter?.cpf === "string" && typeof voter?.privateKey === "string"
+        typeof voter?.cpf === "string" && (typeof voter?.pin === "string" || typeof voter?.privateKey === "string")
     );
   } catch {
     return [];
@@ -150,7 +151,7 @@ function saveDemoVoters(mode: SystemMode, voters: DemoVoter[]) {
 
 function addDemoVoterToMode(mode: SystemMode, voter: DemoVoter) {
   const voters = loadDemoVoters(mode).filter(
-    (item) => item.cpf !== voter.cpf && item.privateKey !== voter.privateKey
+    (item) => item.cpf !== voter.cpf
   );
   const updated = [voter, ...voters];
   saveDemoVoters(mode, updated);
@@ -165,9 +166,8 @@ const state = {
   electorToken: "",
   election: null as Election | null,
   configCpf: "",
-  configPrivateKey: "",
-  votePrivateKey: "",
-  publicKey: "",
+  voteCpf: "",
+  votePin: "",
   selectedChoice: "",
   txid: "",
   receipt: null as Receipt | null,
@@ -183,6 +183,7 @@ const state = {
   ballotCandidates: [] as CandidateDraft[],
   auditSearchTxid: "",
   auditSearchHash: "",
+  targetNodeId: "fiscal-2",
   auditSearchResult: null as Receipt | null,
   auditSearchError: "",
   busy: false,
@@ -225,13 +226,21 @@ function escapeHtml(value: string) {
 }
 
 async function api<T>(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${activeApiBase()}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {})
+  let response: Response;
+  try {
+    response = await fetch(`${activeApiBase()}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers ?? {})
+      }
+    });
+  } catch (error) {
+    if (error instanceof TypeError && error.message.includes("fetch")) {
+      throw new Error("Não foi possível conectar ao servidor. O Backend (porta 3333) pode estar offline ou indisponível.");
     }
-  });
+    throw error;
+  }
 
   const text = await response.text();
   const isJson = response.headers.get("content-type")?.includes("application/json") ?? false;
@@ -240,11 +249,11 @@ async function api<T>(path: string, options: RequestInit = {}) {
   if (text && isJson) {
     body = JSON.parse(text);
   } else if (text && !isJson) {
-    throw new Error("Resposta inesperada do servidor. Reinicie o backend e tente novamente.");
+    throw new Error("Resposta inesperada do servidor. Verifique se a aplicação não sofreu um erro interno fatal.");
   }
 
   if (!response.ok) {
-    throw new Error(body?.error?.message ?? "Erro inesperado na API.");
+    throw new Error(body?.error?.message ?? "Erro desconhecido retornado pelo servidor.");
   }
   return body as T;
 }
@@ -313,7 +322,8 @@ function resetRuntimeStateForMode(mode: SystemMode) {
   state.adminToken = "";
   state.electorToken = "";
   state.election = null;
-  state.publicKey = "";
+  state.voteCpf = "";
+  state.votePin = "";
   state.selectedChoice = "";
   state.txid = "";
   state.receipt = null;
@@ -376,36 +386,24 @@ async function initialize() {
   await refreshRouteData();
 }
 
-async function generatePublicKey() {
-  const result = await api<{ data: { publicKey: string } }>("/crypto/public-key", {
-    method: "POST",
-    body: JSON.stringify({ privateKeySimulation: state.configPrivateKey })
-  });
-  state.publicKey = result.data.publicKey;
-  return result.data.publicKey;
-}
+
 
 async function registerVoter() {
   if (!state.election || isElectionLocked()) return;
 
   await withBusy(async () => {
     const cpfToSave = state.configCpf;
-    const pkToSave = state.configPrivateKey;
-    const publicKey = await generatePublicKey();
-    await api(`/admin/elections/${state.election!.id}/voters`, {
+    const result = await api<{ data: { pin: string } }>(`/admin/elections/${state.election!.id}/voters`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.adminToken}` },
       body: JSON.stringify({
-        cpf: cpfToSave,
-        publicKey
+        cpf: cpfToSave
       })
     });
 
-
     state.configCpf = "";
-    state.configPrivateKey = "";
     
-    const voter = { cpf: cpfToSave, privateKey: pkToSave, electionId: state.election!.id };
+    const voter = { cpf: cpfToSave, pin: result.data.pin, electionId: state.election!.id };
     state.demoVoters = addDemoVoterToMode(state.mode, voter);
     if (state.mode === "votify") {
       addDemoVoterToMode("votifalho", voter);
@@ -461,7 +459,8 @@ async function castVote() {
         headers: { Authorization: `Bearer ${state.electorToken}` },
         body: JSON.stringify({
           choice: state.selectedChoice,
-          privateKeySimulation: state.votePrivateKey
+          cpf: state.voteCpf,
+          pin: state.votePin
         })
       }
     );
@@ -586,14 +585,8 @@ function randomCpf() {
   return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
 }
 
-function randomPrivateKey() {
-  return Array.from({ length: 3 }, () => randomDigit()).join("");
-}
-
 function fillRandomVoter() {
   state.configCpf = randomCpf();
-  state.configPrivateKey = randomPrivateKey();
-  state.publicKey = "";
   render();
 }
 
@@ -605,7 +598,8 @@ function clearDemoVoters() {
 
 function clearVoteForm() {
   state.selectedChoice = "";
-  state.votePrivateKey = "";
+  state.voteCpf = "";
+  state.votePin = "";
   state.txid = "";
   state.receipt = null;
   state.auditSearchTxid = "";
@@ -674,7 +668,7 @@ async function compromiseFiscalNode() {
 
   const choice = state.election.candidates[0]?.number ?? "1";
   await withBusy(async () => {
-    await api("/admin/nodes/fiscal-2/compromise-audit", {
+    await api(`/admin/nodes/${state.targetNodeId}/compromise-audit`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.adminToken}` },
       body: JSON.stringify({
@@ -691,7 +685,7 @@ async function stopFiscalNode() {
   if (state.mode !== "votify") return;
 
   await withBusy(async () => {
-    await api("/admin/nodes/fiscal-2/offline", {
+    await api(`/admin/nodes/${state.targetNodeId}/offline`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.adminToken}` }
     });
@@ -703,7 +697,7 @@ async function restoreFiscalNode() {
   if (state.mode !== "votify") return;
 
   await withBusy(async () => {
-    await api("/admin/nodes/fiscal-2/restore", {
+    await api(`/admin/nodes/${state.targetNodeId}/restore`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.adminToken}` }
     });
@@ -917,9 +911,14 @@ function renderNodeAuditCard(node: NodeAudit) {
 function renderNodeControls() {
   return `
     <div class="consensus-actions">
-      <button id="compromiseNode" class="secondary" ${state.busy ? "disabled" : ""}>Comprometer Nó 3</button>
-      <button id="stopNode" class="secondary" ${state.busy ? "disabled" : ""}>Derrubar Nó 3</button>
-      <button id="restoreNode" class="primary" ${state.busy ? "disabled" : ""}>Restaurar Nó 3</button>
+      <select id="targetNode" ${state.busy ? "disabled" : ""}>
+        <option value="master" ${state.targetNodeId === "master" ? "selected" : ""}>Nó 1 (Master)</option>
+        <option value="fiscal-1" ${state.targetNodeId === "fiscal-1" ? "selected" : ""}>Nó 2 (Fiscal 1)</option>
+        <option value="fiscal-2" ${state.targetNodeId === "fiscal-2" ? "selected" : ""}>Nó 3 (Fiscal 2)</option>
+      </select>
+      <button id="compromiseNode" class="secondary" ${state.busy ? "disabled" : ""}>Comprometer</button>
+      <button id="stopNode" class="secondary" ${state.busy ? "disabled" : ""}>Derrubar</button>
+      <button id="restoreNode" class="primary" ${state.busy ? "disabled" : ""}>Restaurar</button>
     </div>
   `;
 }
@@ -1009,19 +1008,10 @@ function renderConfigPage() {
             CPF
             <input id="configCpf" value="${escapeHtml(state.configCpf)}" ${locked ? "disabled" : ""} />
           </label>
-          <label>
-            Chave Privada
-            <input id="configPrivateKey" value="${escapeHtml(state.configPrivateKey)}" ${locked ? "disabled" : ""} />
-          </label>
           <div class="form-actions">
             <button id="randomVoter" class="secondary" ${state.busy || locked ? "disabled" : ""}>Gerar dados</button>
             <button id="registerVoter" class="primary" ${!state.election || state.busy || locked ? "disabled" : ""}>Cadastrar eleitor</button>
           </div>
-          ${
-            state.publicKey
-              ? `<div class="key-box"><span>Chave pública</span><strong>${short(state.publicKey, 16, 14)}</strong></div>`
-              : ""
-          }
         </article>
 
         <article class="panel">
@@ -1063,7 +1053,7 @@ function renderConfigPage() {
               (voter) => `
                 <div class="voter-item">
                   <span>${escapeHtml(voter.cpf)}</span>
-                  <strong>${escapeHtml(voter.privateKey)}</strong>
+                  <strong>${escapeHtml(voter.pin || voter.privateKey || "")}</strong>
                 </div>
               `
             )
@@ -1212,8 +1202,12 @@ function renderVotePage() {
           <h2>Voto</h2>
         </div>
         <label>
-          Chave Privada
-          <input id="votePrivateKey" value="${escapeHtml(state.votePrivateKey)}" />
+          CPF
+          <input id="voteCpf" value="${escapeHtml(state.voteCpf)}" />
+        </label>
+        <label>
+          PIN de Votação
+          <input id="votePin" value="${escapeHtml(state.votePin)}" type="password" />
         </label>
         <div class="candidates">
           ${renderCandidates()}
@@ -1383,18 +1377,17 @@ function renderPage() {
 }
 
 function bindCommonEvents() {
-  const votePrivateKey = document.querySelector<HTMLInputElement>("#votePrivateKey");
-  if (votePrivateKey) {
-    votePrivateKey.oninput = (event) => {
-      state.votePrivateKey = (event.target as HTMLInputElement).value;
+  const voteCpf = document.querySelector<HTMLInputElement>("#voteCpf");
+  if (voteCpf) {
+    voteCpf.oninput = (event) => {
+      state.voteCpf = (event.target as HTMLInputElement).value;
     };
   }
 
-  const configPrivateKey = document.querySelector<HTMLInputElement>("#configPrivateKey");
-  if (configPrivateKey) {
-    configPrivateKey.oninput = (event) => {
-      state.configPrivateKey = (event.target as HTMLInputElement).value;
-      state.publicKey = "";
+  const votePin = document.querySelector<HTMLInputElement>("#votePin");
+  if (votePin) {
+    votePin.oninput = (event) => {
+      state.votePin = (event.target as HTMLInputElement).value;
     };
   }
 
@@ -1491,6 +1484,14 @@ function bindCommonEvents() {
       state.auditSearchHash = auditSearchHash.value;
       state.auditSearchResult = null;
       state.auditSearchError = "";
+      render();
+    };
+  }
+
+  const targetNode = document.querySelector<HTMLSelectElement>("#targetNode");
+  if (targetNode) {
+    targetNode.onchange = () => {
+      state.targetNodeId = targetNode.value;
       render();
     };
   }
