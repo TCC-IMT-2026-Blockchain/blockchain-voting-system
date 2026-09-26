@@ -840,9 +840,9 @@ function renderReceipt() {
         <div><span>Confirmações</span><strong>${confirmations}</strong></div>
         <div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
         </div>
-        ${receipt.qrCodeBase64 ? `<div style="text-align: center; margin-top: 1rem;"><img src="${receipt.qrCodeBase64}" style="width: 150px; height: 150px; display: inline-block; border-radius: 4px;" alt="QR Code" /></div>` : ""}
+        ${receipt.qrCodeBase64 ? `<div style="text-align: center; margin-top: 0.5rem;"><img src="${receipt.qrCodeBase64}" style="width: 150px; height: 150px; display: inline-block; border-radius: 4px;" alt="QR Code" /></div>` : ""}
         ${printHtml}
-        ${state.mode === "votify" ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><a href="/comprovante" class="button secondary" style="text-decoration: none; display: inline-block; text-align: center;">Verificar Voto</a></div>` : ""}
+        ${state.mode === "votify" && state.txid && (receipt.receipt_hash || receipt.receiptHash) ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><button class="secondary" style="width: 100%;" onclick="window.location.href='/comprovante?token=' + btoa('${state.txid}:${receipt.receipt_hash ?? receipt.receiptHash ?? ""}')">Verificar Voto</button></div>` : ""}
       </div>
   `;
 }
@@ -1630,9 +1630,10 @@ function render() {
       ${renderPage()}
 
       <footer class="footer-links">
-        <a class="${currentRoute === "configuracao" ? "active" : ""}" href="/configuracao">Configuração</a>
-        <a class="${currentRoute === "auditoria" ? "active" : ""}" href="/auditoria">Auditoria</a>
-      </footer>
+          <a class="${currentRoute === "configuracao" ? "active" : ""}" href="/configuracao">Configura&ccedil;&atilde;o</a>
+          <a class="${currentRoute === "auditoria" ? "active" : ""}" href="/auditoria">Auditoria</a>
+          <a class="${currentRoute === "comprovante" ? "active" : ""}" href="/comprovante">Verificar Voto</a>
+        </footer>
     </section>
   `;
 

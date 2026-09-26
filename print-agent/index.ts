@@ -22,47 +22,111 @@ socket.on("connect", () => {
   console.log(`[PrintAgent] Conectado ao servidor Backend em ${BACKEND_URL}`);
 });
 
+/** Read width/height from a PNG file header (bytes 16-23). */
+function pngSize(filePath: string): { w: number; h: number } {
+  const buf = fs.readFileSync(filePath);
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+
 socket.on("print_receipt", async (payload) => {
   const { txid, hash, qrCodeBase64 } = payload;
   const tmpPdfPath = path.join(process.cwd(), `receipt_${randomUUID()}.pdf`);
 
   try {
     console.log(`[PrintAgent] Recebido job de impressão para TXID: ${txid}`);
-    const doc = new PDFDocument({ size: [226, 340], margin: 10 });
-    const writeStream = fs.createWriteStream(tmpPdfPath);
-    doc.pipe(writeStream);
 
+    // ── Layout constants (all values in PDF points, 1pt ≈ 0.35mm) ──
+    const W   = 226;          // page width (~80mm thermal roll)
+    const M   = 8;            // side margin
+    const TW  = W - M * 2;   // usable text width
+    const PAD = 2;            // top & bottom page padding (~0.7mm)
+    const GAP = 3;            // inter-section gap (~1mm)
+
+    // ── Pre-compute URL ──
+    const token    = Buffer.from(`${txid}:${hash}`).toString("base64");
+    const baseUrl  = process.env.FRONTEND_BASE_URL || "http://localhost:5173";
+    const fullUrl  = `${baseUrl}/comprovante?token=${token}`;
+
+    // ── Logo dimensions ──
     const logoPath = path.join(process.cwd(), "assets", "logo-black.png");
-    if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, (226 - 80) / 2, 15, { width: 80 });
-      doc.y = 75;
+    const hasLogo  = fs.existsSync(logoPath);
+    const logoRenderW = 55;                                         // desired print width
+    let   logoRenderH = 40;                                         // fallback
+    if (hasLogo) {
+      const { w, h } = pngSize(logoPath);
+      logoRenderH = (h / w) * logoRenderW;                         // keep aspect ratio
     }
-    doc.fontSize(12).text("Comprovante de Voto", { align: "center" });
-    doc.moveDown();
-    doc.fontSize(8).text(`TXID:\n${txid}`);
-    doc.moveDown();
-    doc.text(`Hash:\n${hash}`);
-    doc.moveDown();
 
+    // ── QR buffer (reused across passes) ──
+    let qrBuf: Buffer | null = null;
     if (qrCodeBase64) {
-      const qrImage = Buffer.from(qrCodeBase64.replace(/^data:image\/png;base64,/, ""), "base64");
-      doc.image(qrImage, { fit: [150, 150], align: 'center' });
+      qrBuf = Buffer.from(qrCodeBase64.replace(/^data:image\/png;base64,/, ""), "base64");
     }
-    
-    doc.moveDown(0.5);
-    doc.fontSize(6).text(`Validar em:`, { align: 'center' });
-    const token = Buffer.from(`${txid}:${hash}`).toString("base64");
-    doc.text(`${process.env.FRONTEND_BASE_URL || "http://localhost:5173"}/comprovante`, { align: 'center' });
-    doc.text(`?token=${token}`, { align: 'center' });
+    const QR_W = 95;
 
-    const docPromise = new Promise((resolve, reject) => {
-      writeStream.on("finish", resolve);
-      writeStream.on("error", reject);
-    });
+    // ── Render function — draws everything and returns final Y ──
+    function draw(doc: InstanceType<typeof PDFDocument>): number {
+      let y = PAD;
 
+      // 1. Logo
+      if (hasLogo) {
+        doc.image(logoPath, (W - logoRenderW) / 2, y, { width: logoRenderW });
+        y += logoRenderH;
+      }
+
+      // 2. Title
+      y += GAP;
+      doc.fontSize(11).text("Comprovante de Voto", M, y, {
+        align: "center", width: TW,
+      });
+      y = doc.y;
+
+      // 3. TXID
+      y += GAP;
+      doc.fontSize(7).text(`TXID: ${txid}`, M, y, { width: TW });
+      y = doc.y;
+
+      // 4. Hash
+      y += 2;
+      doc.fontSize(7).text(`Hash: ${hash}`, M, y, { width: TW });
+      y = doc.y;
+
+      // 5. QR Code
+      if (qrBuf) {
+        y += GAP;
+        doc.image(qrBuf, (W - QR_W) / 2, y, { width: QR_W });
+        y += QR_W;
+      }
+
+      // 6. "Validar em:" + full URL (tiny gap — QR image has internal white border)
+      y += 2;
+      doc.fontSize(6).text("Validar em:", M, y, { align: "center", width: TW });
+      doc.fontSize(5).text(fullUrl, M, doc.y, { align: "center", width: TW });
+
+      return doc.y;   // final content bottom
+    }
+
+    // ── Pass 1: measure on a tall scratch page (margin:0 = no auto page-break) ──
+    const scratchDoc = new PDFDocument({ size: [W, 800], margin: 0 });
+    scratchDoc.pipe(fs.createWriteStream(tmpPdfPath));
+    const contentBottom = draw(scratchDoc);
+    scratchDoc.end();
+    await new Promise<void>((r) => setTimeout(r, 80));
+
+    // ── Pass 2: render on exact-height page ──
+    const pageH = contentBottom + PAD;
+    console.log(`[PrintAgent] Altura calculada do recibo: ${pageH.toFixed(1)}pt`);
+
+    const doc = new PDFDocument({ size: [W, pageH], margin: 0 });
+    const ws  = fs.createWriteStream(tmpPdfPath);
+    doc.pipe(ws);
+    draw(doc);
+
+    const done = new Promise((res, rej) => { ws.on("finish", res); ws.on("error", rej); });
     doc.end();
-    await docPromise;
+    await done;
 
+    // ── Send to printer ──
     if (PRINTER_NAME) {
       await print(tmpPdfPath, { printer: PRINTER_NAME });
     } else {

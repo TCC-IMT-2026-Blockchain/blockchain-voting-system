@@ -8,5 +8,5 @@ export function buildVerifyUrl(txid: string, hash: string): string {
 
 export async function generateQrCodeBase64(txid: string, hash: string): Promise<string> {
   const url = buildVerifyUrl(txid, hash);
-  return QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 2 });
+  return QRCode.toDataURL(url, { errorCorrectionLevel: "M", margin: 1 });
 }
