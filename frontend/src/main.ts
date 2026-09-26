@@ -6,7 +6,7 @@ import faviconVotifalhoUrl from "./assets/votifalho_logo.png";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3333/api/v1";
 
-type RouteName = "voto" | "configuracao" | "auditoria" | "admin";
+type RouteName = "voto" | "configuracao" | "auditoria" | "admin" | "comprovante";
 type SystemMode = "votify" | "votifalho";
 
 type Election = {
@@ -171,6 +171,8 @@ const state = {
   selectedChoice: "",
   txid: "",
   receipt: null as Receipt | null,
+  printStatus: null as "pending" | "success" | "failed" | null,
+  printError: null as string | null,
   audit: null as AuditReport | null,
   consensus: null as ConsensusAudit | null,
   attackFromChoice: "",
@@ -212,6 +214,7 @@ function route(): RouteName {
   const path = window.location.pathname.replace(/\/$/, "");
   if (path === "/configuracao") return "configuracao";
   if (path === "/auditoria") return "auditoria";
+  if (path === "/comprovante") return "comprovante";
   if (path === "/admin") return "admin";
   return "voto";
 }
@@ -317,6 +320,8 @@ function resetRuntimeStateForMode(mode: SystemMode) {
   state.selectedChoice = "";
   state.txid = "";
   state.receipt = null;
+  state.printStatus = null;
+  state.printError = null;
   state.audit = null;
   state.consensus = null;
   state.attackFromChoice = "";
@@ -495,6 +500,20 @@ async function refreshReceipt() {
   }
 }
 
+async function refreshPrintStatus() {
+  if (!state.election || !state.txid || state.printStatus === "success") return;
+
+  try {
+    const result = await api<{ status: "pending" | "success" | "failed", error?: string }>(
+      `/elections/${state.election.id}/votes/${state.txid}/print-status`
+    );
+    state.printStatus = result.status;
+    state.printError = result.error ?? null;
+  } catch {
+    // Silently fail, it might not be ready
+  }
+}
+
 async function refreshAuditAndStatus(visual = false) {
   if (!state.election || !state.adminToken) return;
 
@@ -554,6 +573,7 @@ async function pollCurrentRoute() {
 
     if (currentRoute === "voto" && state.txid) {
       await refreshReceipt();
+      await refreshPrintStatus();
       state.error = "";
       render();
     }
@@ -614,6 +634,15 @@ function clearVoteForm() {
   state.auditSearchError = "";
   state.error = "";
   render();
+}
+
+async function reprintReceipt() {
+  if (!state.election || !state.txid) return;
+  await withBusy(async () => {
+    await api(`/elections/${state.election!.id}/votes/${state.txid}/reprint`, { method: "POST" });
+    state.printStatus = "pending";
+    state.printError = null;
+  });
 }
 
 async function executeChangeVoteAttack() {
@@ -782,6 +811,22 @@ function renderReceipt() {
     `;
   }
 
+  let printHtml = "";
+  if (state.mode === "votify") {
+    if (state.printStatus === "failed") {
+      printHtml = `
+        <div class="notice error" style="margin-top: 1rem;">
+          <p>${escapeHtml(state.printError || "Não foi possível imprimir seu comprovante físico. Seu voto foi registrado normalmente.")}</p>
+          <button id="reprintReceipt" class="secondary" style="margin-top: 0.5rem;" ${state.busy ? "disabled" : ""}>Reimprimir comprovante</button>
+        </div>
+      `;
+    } else if (state.printStatus === "success") {
+      printHtml = `<div class="notice success" style="margin-top: 1rem;">Comprovante impresso com sucesso. Retire na impressora.</div>`;
+    } else if (state.printStatus === "pending") {
+      printHtml = `<div class="notice info" style="margin-top: 1rem;">Enviando para impressão...</div>`;
+    }
+  }
+
   return `
     <div class="receipt-card">
       <div class="receipt-head">
@@ -794,6 +839,7 @@ function renderReceipt() {
         <div><span>Confirmações</span><strong>${confirmations}</strong></div>
         <div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
       </div>
+      ${printHtml}
     </div>
   `;
 }
@@ -1231,7 +1277,6 @@ function renderVotePage() {
         ${renderReceipt()}
       </article>
     </section>
-    ${state.mode === "votify" ? `<section class="integrity-layout">${renderVoteIntegrityWidget()}</section>` : ""}
   `;
 }
 
@@ -1374,11 +1419,47 @@ function renderModeSwitch() {
   `;
 }
 
+function renderComprovantePage() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+  let txid = "";
+  let hash = "";
+
+  if (token) {
+    try {
+      const decoded = atob(token);
+      const parts = decoded.split(":");
+      txid = parts[0];
+      hash = parts.slice(1).join(":");
+      
+      if (txid && hash && (state.auditSearchTxid !== txid || state.auditSearchHash !== hash)) {
+        state.auditSearchTxid = txid;
+        state.auditSearchHash = hash;
+        if (state.election && !state.busy) {
+          setTimeout(() => void searchAuditTxid(), 0);
+        }
+      }
+    } catch (e) {
+      console.error("Token de comprovante inválido", e);
+    }
+  }
+
+  return `
+    <div class="page-action">
+      <a href="/" class="back-link">Voltar</a>
+    </div>
+    <section class="single">
+      ${renderAuditSearch()}
+    </section>
+  `;
+}
+
 function renderPage() {
   const currentRoute = route();
   if (currentRoute === "configuracao") return renderConfigPage();
   if (currentRoute === "auditoria") return renderAuditPage();
   if (currentRoute === "admin") return renderAdminPage();
+  if (currentRoute === "comprovante") return renderComprovantePage();
   return renderVotePage();
 }
 
@@ -1505,6 +1586,7 @@ function bindCommonEvents() {
   document.querySelector<HTMLButtonElement>("#randomVoter")?.addEventListener("click", () => fillRandomVoter());
   document.querySelector<HTMLButtonElement>("#clearVoters")?.addEventListener("click", () => clearDemoVoters());
   document.querySelector<HTMLButtonElement>("#clearVote")?.addEventListener("click", () => clearVoteForm());
+  document.querySelector<HTMLButtonElement>("#reprintReceipt")?.addEventListener("click", () => void reprintReceipt());
   document.querySelector<HTMLButtonElement>("#castVote")?.addEventListener("click", () => void castVote());
   document.querySelector<HTMLButtonElement>("#executeAttack")?.addEventListener("click", () => void executeChangeVoteAttack());
   document.querySelector<HTMLButtonElement>("#executeNodeCommand")?.addEventListener("click", () => void executeNodeCommand());

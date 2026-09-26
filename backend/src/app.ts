@@ -11,6 +11,9 @@ import { visualEvents, type VisualEventType, type VisualSystem } from "./service
 import { derivePublicKey, safePublicUser } from "./lib/crypto.js";
 import { HttpError, errorResponse } from "./lib/errors.js";
 import { requireAuth, requireRole, type AuthenticatedRequest } from "./http/auth.js";
+import { generateQrCodeBase64 } from "./services/qrCodeService.js";
+import { dispatchPrintJob } from "./server.js";
+import { getJob } from "./services/printJobRegistry.js";
 
 export const app = express();
 
@@ -1460,6 +1463,7 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
         receipt: result.receipt
       }
     });
+
   } catch (error) {
     emitVisualEvent("vote_rejected", "votify", {
       reason: visualErrorCode(error)
@@ -1471,7 +1475,19 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
 router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req, res, next) => {
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-    const receipt = await blockchain.receipt(election.chainElectionId, routeParam(req.params.txid, "txid"));
+    const txid = routeParam(req.params.txid, "txid");
+    const receipt = await blockchain.receipt(election.chainElectionId, txid);
+    
+    const hash = String((receipt as any)?.receipt_hash || (receipt as any)?.receiptHash || "");
+    if (hash && !getJob(txid)) {
+      try {
+        const qrCodeBase64 = await generateQrCodeBase64(txid, hash);
+        dispatchPrintJob(txid, hash, qrCodeBase64);
+      } catch (err) {
+        console.error("Falha auto-print:", err);
+      }
+    }
+
     if (req.query.visual === "1") {
       emitVisualEvent("receipt_verified", "votify");
     }
@@ -1484,6 +1500,19 @@ router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req
     }
     next(error);
   }
+});
+
+router.get("/elections/:electionId/votes/:txid/print-status", (req, res) => {
+  const job = getJob(req.params.txid);
+  if (!job) return res.status(404).json({ error: "Nenhum job de impressão encontrado." });
+  res.json({ status: job.status, error: job.error ?? null });
+});
+
+router.post("/elections/:electionId/votes/:txid/reprint", (req, res) => {
+  const job = getJob(req.params.txid);
+  if (!job) return res.status(404).json({ error: "Nenhum comprovante encontrado para reimprimir." });
+  dispatchPrintJob(job.txid, job.hash, job.qrCodeBase64);
+  res.status(202).json({ message: "Reimpressão solicitada." });
 });
 
 router.get("/elections/:electionId/audit", requireAuth, requireRole("ADMIN", "AUDITOR"), async (req, res, next) => {
