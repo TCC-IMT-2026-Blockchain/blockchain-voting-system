@@ -28,16 +28,15 @@ socket.on("print_receipt", async (payload) => {
 
   try {
     console.log(`[PrintAgent] Recebido job de impressão para TXID: ${txid}`);
-    const doc = new PDFDocument({ size: [226, 400], margin: 10 });
+    const doc = new PDFDocument({ size: [226, 340], margin: 10 });
     const writeStream = fs.createWriteStream(tmpPdfPath);
     doc.pipe(writeStream);
 
-    const logoPath = path.join(process.cwd(), "assets", "logo-votify.png");
+    const logoPath = path.join(process.cwd(), "assets", "logo-black.png");
     if (fs.existsSync(logoPath)) {
-      doc.image(logoPath, { fit: [100, 100], align: 'center' });
+      doc.image(logoPath, (226 - 80) / 2, 15, { width: 80 });
+      doc.y = 75;
     }
-
-    doc.moveDown();
     doc.fontSize(12).text("Comprovante de Voto", { align: "center" });
     doc.moveDown();
     doc.fontSize(8).text(`TXID:\n${txid}`);
@@ -50,7 +49,7 @@ socket.on("print_receipt", async (payload) => {
       doc.image(qrImage, { fit: [150, 150], align: 'center' });
     }
     
-    doc.moveDown(12);
+    doc.moveDown(0.5);
     doc.fontSize(6).text(`Validar em:`, { align: 'center' });
     const token = Buffer.from(`${txid}:${hash}`).toString("base64");
     doc.text(`${process.env.FRONTEND_BASE_URL || "http://localhost:5173"}/comprovante`, { align: 'center' });

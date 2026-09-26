@@ -1,47 +1,40 @@
 {
   "elections": [
     {
-      "id": "1149ddb1-2c53-4c4a-b1b1-a3008c5d847b",
+      "id": "ece915c1-6dca-4d95-80d8-5ab742fa4588",
       "chainElectionId": "BANCO_TRADICIONAL_001",
       "title": "Votação",
       "description": "Votação usada para demonstrar o fluxo completo do Votify.",
       "status": "OPEN",
-      "startsAt": "2026-09-26T18:45:46.856Z",
-      "endsAt": "2026-10-03T18:45:46.857Z",
+      "startsAt": "2026-09-26T19:15:43.048Z",
+      "endsAt": "2026-10-03T19:15:43.049Z",
       "candidates": [
         {
-          "id": "9135e7a3-3427-404b-87aa-8eeedeeef42a",
-          "electionId": "1149ddb1-2c53-4c4a-b1b1-a3008c5d847b",
+          "id": "9b6a462e-b8dd-4d87-8e5b-5de603a447cf",
+          "electionId": "ece915c1-6dca-4d95-80d8-5ab742fa4588",
           "name": "Leo",
           "number": "1",
           "description": null
-        },
-        {
-          "id": "15e11978-f2e2-4f21-a3e3-c9bcba79e595",
-          "electionId": "1149ddb1-2c53-4c4a-b1b1-a3008c5d847b",
-          "name": "Enrico",
-          "number": "2",
-          "description": null
         }
       ],
-      "createdAt": "2026-09-26T18:45:46.858Z",
-      "updatedAt": "2026-09-26T18:46:14.748Z"
+      "createdAt": "2026-09-26T19:15:43.050Z",
+      "updatedAt": "2026-09-26T19:16:28.132Z"
     }
   ],
   "voters": [
     {
-      "id": "72ae095d-9e4b-4c7a-9c27-eb436f98366d",
-      "electionId": "1149ddb1-2c53-4c4a-b1b1-a3008c5d847b",
-      "cpf": "576.254.732-30",
-      "publicKey": "pub_c498f3fe97c0df55ee8dea01a72572059b93f42d235a5e439e9c9a1654d6d4e1",
-      "createdAt": "2026-09-26T18:46:02.755Z"
+      "id": "a4f8cc63-d6ed-45b4-ae85-28a6ed9d5502",
+      "electionId": "ece915c1-6dca-4d95-80d8-5ab742fa4588",
+      "cpf": "690.795.720-06",
+      "publicKey": "pub_724213d95916de041564e5d39c2373585dc15855743a42a5841d849b9f3716de",
+      "createdAt": "2026-09-26T19:16:20.288Z"
     },
     {
-      "id": "bd0eea63-ca9c-4c59-ad5f-a2063026e764",
-      "electionId": "1149ddb1-2c53-4c4a-b1b1-a3008c5d847b",
-      "cpf": "078.861.837-29",
-      "publicKey": "pub_6db6eb4af1e18ab81d3878e44672185d60ca8c988c9e2f7783de220735534c33",
-      "createdAt": "2026-09-26T18:46:04.068Z"
+      "id": "e3b43939-c2ba-4458-8456-7bb955a90395",
+      "electionId": "ece915c1-6dca-4d95-80d8-5ab742fa4588",
+      "cpf": "352.906.608-85",
+      "publicKey": "pub_8920a14a7f6469b955b114111564cb9736440238d220fc9fd525efdb9a056d3e",
+      "createdAt": "2026-09-26T19:16:21.646Z"
     }
   ],
   "votes": []

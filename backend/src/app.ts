@@ -1479,10 +1479,15 @@ router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req
     const receipt = await blockchain.receipt(election.chainElectionId, txid);
     
     const hash = String((receipt as any)?.receipt_hash || (receipt as any)?.receiptHash || "");
-    if (hash && !getJob(txid)) {
+    const status = (receipt as any)?.status;
+    let qrCodeBase64 = null;
+
+    if (status === "confirmed" && hash) {
       try {
-        const qrCodeBase64 = await generateQrCodeBase64(txid, hash);
-        dispatchPrintJob(txid, hash, qrCodeBase64);
+        qrCodeBase64 = await generateQrCodeBase64(txid, hash);
+        if (!getJob(txid)) {
+          dispatchPrintJob(txid, hash, qrCodeBase64);
+        }
       } catch (err) {
         console.error("Falha auto-print:", err);
       }
@@ -1491,7 +1496,7 @@ router.get("/elections/:electionId/votes/:txid/receipt", requireAuth, async (req
     if (req.query.visual === "1") {
       emitVisualEvent("receipt_verified", "votify");
     }
-    res.json({ data: receipt });
+    res.json({ data: { ...(receipt as any), qrCodeBase64 } });
   } catch (error) {
     if (req.query.visual === "1") {
       emitVisualEvent("receipt_rejected", "votify", {

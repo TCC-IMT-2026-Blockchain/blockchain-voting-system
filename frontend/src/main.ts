@@ -32,6 +32,7 @@ type CandidateDraft = {
 };
 
 type Receipt = {
+  qrCodeBase64?: string;
   txid?: string;
   receipt_hash?: string;
   receiptHash?: string;
@@ -838,9 +839,11 @@ function renderReceipt() {
         <div><span>Bloco</span><strong>${receipt.blockheight ?? "-"}</strong></div>
         <div><span>Confirmações</span><strong>${confirmations}</strong></div>
         <div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
+        </div>
+        ${receipt.qrCodeBase64 ? `<div style="text-align: center; margin-top: 1rem;"><img src="${receipt.qrCodeBase64}" style="width: 150px; height: 150px; display: inline-block; border-radius: 4px;" alt="QR Code" /></div>` : ""}
+        ${printHtml}
+        ${state.mode === "votify" ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><a href="/comprovante" class="button secondary" style="text-decoration: none; display: inline-block; text-align: center;">Verificar Voto</a></div>` : ""}
       </div>
-      ${printHtml}
-    </div>
   `;
 }
 
