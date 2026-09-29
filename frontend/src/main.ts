@@ -629,6 +629,8 @@ function clearVoteForm() {
   state.votePrivateKey = "";
   state.txid = "";
   state.receipt = null;
+  state.printStatus = null;
+  state.printError = null;
   state.auditSearchTxid = "";
   state.auditSearchHash = "";
   state.auditSearchResult = null;
@@ -796,6 +798,8 @@ function renderReceipt() {
   const statusLabel = receiptStatusLabel(status);
   const isRegistered = status === "confirmed" || status === "registered";
 
+  const isBlockConfirmed = receipt.blockheight != null;
+
   if (state.mode === "votifalho") {
     return `
       <div class="receipt-card">
@@ -838,11 +842,11 @@ function renderReceipt() {
         <div><span>TXID</span><strong class="selectable">${escapeHtml(state.txid)}</strong></div>
         <div><span>Bloco</span><strong>${receipt.blockheight ?? "-"}</strong></div>
         <div><span>Confirmações</span><strong>${confirmations}</strong></div>
-        <div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
+        ${isBlockConfirmed ? `<div><span>Hash</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>` : ""}
         </div>
         ${receipt.qrCodeBase64 ? `<div style="text-align: center; margin-top: 0.5rem;"><img src="${receipt.qrCodeBase64}" style="width: 150px; height: 150px; display: inline-block; border-radius: 4px;" alt="QR Code" /></div>` : ""}
         ${printHtml}
-        ${state.mode === "votify" && state.txid && (receipt.receipt_hash || receipt.receiptHash) ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><button class="secondary" style="width: 100%;" onclick="window.location.href='/comprovante?token=' + btoa('${state.txid}:${receipt.receipt_hash ?? receipt.receiptHash ?? ""}')">Verificar Voto</button></div>` : ""}
+        ${state.mode === "votify" && state.txid && isBlockConfirmed && (receipt.receipt_hash || receipt.receiptHash) ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><button class="secondary" style="width: 100%;" onclick="window.location.href='/comprovante?token=' + btoa('${state.txid}:${receipt.receipt_hash ?? receipt.receiptHash ?? ""}')">Verificar Voto</button></div>` : ""}
       </div>
   `;
 }

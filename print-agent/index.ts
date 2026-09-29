@@ -28,6 +28,8 @@ function pngSize(filePath: string): { w: number; h: number } {
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
 
+let cachedPageH: number | null = null;
+
 socket.on("print_receipt", async (payload) => {
   const { txid, hash, qrCodeBase64 } = payload;
   const tmpPdfPath = path.join(process.cwd(), `receipt_${randomUUID()}.pdf`);
@@ -43,9 +45,8 @@ socket.on("print_receipt", async (payload) => {
     const GAP = 3;            // inter-section gap (~1mm)
 
     // ── Pre-compute URL ──
-    const token    = Buffer.from(`${txid}:${hash}`).toString("base64");
     const baseUrl  = process.env.FRONTEND_BASE_URL || "http://localhost:5173";
-    const fullUrl  = `${baseUrl}/comprovante?token=${token}`;
+    const fullUrl  = `${baseUrl}/comprovante`;
 
     // ── Logo dimensions ──
     const logoPath = path.join(process.cwd(), "assets", "logo-black.png");
@@ -107,16 +108,23 @@ socket.on("print_receipt", async (payload) => {
     }
 
     // ── Pass 1: measure on a tall scratch page (margin:0 = no auto page-break) ──
-    const scratchDoc = new PDFDocument({ size: [W, 800], margin: 0 });
-    scratchDoc.pipe(fs.createWriteStream(tmpPdfPath));
-    const contentBottom = draw(scratchDoc);
-    scratchDoc.end();
-    await new Promise<void>((r) => setTimeout(r, 80));
+    let pageH = cachedPageH;
+
+    if (!pageH) {
+      const scratchDoc = new PDFDocument({ size: [W, 800], margin: 0 });
+      scratchDoc.pipe(fs.createWriteStream(tmpPdfPath));
+      const contentBottom = draw(scratchDoc);
+      scratchDoc.end();
+      await new Promise<void>((r) => setTimeout(r, 80));
+
+      pageH = contentBottom + PAD;
+      cachedPageH = pageH;
+      console.log(`[PrintAgent] Altura calculada do recibo: ${pageH.toFixed(1)}pt`);
+    } else {
+      console.log(`[PrintAgent] Altura usando cache: ${pageH.toFixed(1)}pt`);
+    }
 
     // ── Pass 2: render on exact-height page ──
-    const pageH = contentBottom + PAD;
-    console.log(`[PrintAgent] Altura calculada do recibo: ${pageH.toFixed(1)}pt`);
-
     const doc = new PDFDocument({ size: [W, pageH], margin: 0 });
     const ws  = fs.createWriteStream(tmpPdfPath);
     doc.pipe(ws);
