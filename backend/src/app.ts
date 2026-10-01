@@ -1,11 +1,10 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { env } from "./config/env.js";
 import { store } from "./data/store.js";
-import { traditionalStore } from "./data/traditionalStore.js";
 import { blockchain } from "./services/blockchainClient.js";
 import { visualEvents, type VisualEventType, type VisualSystem } from "./services/visualEvents.js";
 import { derivePublicKey, safePublicUser } from "./lib/crypto.js";
@@ -22,7 +21,6 @@ app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
 const router = express.Router();
-const traditionalRouter = express.Router();
 
 function emitVisualEvent(type: VisualEventType, system: VisualSystem, metadata?: Record<string, string | number | boolean | null>) {
   if (system !== "votify") return;
@@ -53,100 +51,6 @@ function ensureElectionIsUnlocked(election: { governanceLockedAt?: string | null
       "A eleição já foi travada e não pode mais ser configurada."
     );
   }
-}
-
-function getTraditionalElectionOrThrow(id: string) {
-  const election = traditionalStore.all().elections.find((item) => item.id === id);
-  if (!election) {
-    return {
-      id: id,
-      chainElectionId: "BANCO_TRADICIONAL_001",
-      title: "Banco de dados corrompido ou apagado",
-      description: "O banco de dados centralizado não está disponível.",
-      status: "OPEN",
-      startsAt: now(),
-      endsAt: now(),
-      candidates: [],
-      createdAt: now(),
-      updatedAt: now()
-    };
-  }
-  return election;
-}
-
-function getOrCreateTraditionalMirrorElection(sourceElection: ReturnType<typeof getElectionOrThrow>) {
-  const db = traditionalStore.all();
-  let election = db.elections[0];
-
-  if (!election) {
-    election = {
-      id: randomUUID(),
-      chainElectionId: "BANCO_TRADICIONAL_001",
-      title: sourceElection.title,
-      description: sourceElection.description,
-      status: sourceElection.status,
-      startsAt: sourceElection.startsAt,
-      endsAt: sourceElection.endsAt,
-      candidates: [],
-      createdAt: now(),
-      updatedAt: now()
-    };
-    db.elections.push(election);
-  }
-
-  return { election, db };
-}
-
-function syncTraditionalElectionFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>) {
-  const { election: mirror, db } = getOrCreateTraditionalMirrorElection(sourceElection);
-
-  mirror.title = sourceElection.title;
-  mirror.description = sourceElection.description;
-  mirror.status = sourceElection.status;
-  mirror.startsAt = sourceElection.startsAt;
-  mirror.endsAt = sourceElection.endsAt;
-  mirror.updatedAt = now();
-  mirror.candidates = sourceElection.candidates.map((candidate) => {
-    const existing = mirror.candidates.find((item) => item.number === candidate.number);
-    return {
-      id: existing?.id ?? randomUUID(),
-      electionId: mirror.id,
-      name: candidate.name,
-      number: candidate.number,
-      description: candidate.description ?? null
-    };
-  });
-
-  traditionalStore.save(db);
-  return mirror;
-}
-
-function syncTraditionalVoterFromVotify(sourceElection: ReturnType<typeof getElectionOrThrow>, cpf: string, publicKey: string) {
-  const mirror = syncTraditionalElectionFromVotify(sourceElection);
-  const db = traditionalStore.all();
-  const existing = db.voters.find(
-    (item) => item.electionId === mirror.id && (item.publicKey === publicKey || item.cpf === cpf)
-  );
-
-  if (existing) {
-    existing.cpf = cpf;
-    existing.publicKey = publicKey;
-  } else {
-    db.voters.push({
-      id: randomUUID(),
-      electionId: mirror.id,
-      cpf,
-      publicKey,
-      createdAt: now()
-    });
-  }
-
-  traditionalStore.save(db);
-  return mirror;
-}
-
-function fakeReceiptHash(txid: string, choice: string, createdAt: string) {
-  return createHash("sha256").update(`${txid}|${choice}|${createdAt}`).digest("hex");
 }
 
 type AuditNodeId = "master" | "fiscal-1" | "fiscal-2";
@@ -320,56 +224,6 @@ async function buildNodeConsensus(election: { chainElectionId: string; candidate
   };
 }
 
-function countTraditionalVotes(electionId: string) {
-  return traditionalStore
-    .all()
-    .votes.filter((vote) => vote.electionId === electionId)
-    .reduce<Record<string, number>>((counts, vote) => {
-      counts[vote.choice] = (counts[vote.choice] ?? 0) + 1;
-      return counts;
-    }, {});
-}
-
-function countDuplicatedTraditionalVotes(electionId: string) {
-  const seen = new Set<string>();
-  let duplicates = 0;
-
-  for (const vote of traditionalStore.all().votes.filter((item) => item.electionId === electionId)) {
-    const key = vote.publicKey?.trim() || vote.privateKeySimulation?.trim();
-    if (!key) continue;
-    if (seen.has(key)) {
-      duplicates += 1;
-    } else {
-      seen.add(key);
-    }
-  }
-
-  return duplicates;
-}
-
-function buildTraditionalAudit(electionId: string) {
-  const election = getTraditionalElectionOrThrow(electionId);
-  const votes = traditionalStore.all().votes.filter((item) => item.electionId === election.id);
-  const voters = traditionalStore.all().voters.filter((item) => item.electionId === election.id);
-
-  return {
-    chain: "banco-centralizado",
-    chain_height: 0,
-    election_id: election.chainElectionId,
-    asset: null,
-    burn_address: null,
-    tokens_burned_by_vote_transactions: 0,
-    votes_total: votes.length,
-    votes_by_choice: countTraditionalVotes(election.id),
-    credentials_issued: voters.length,
-    votes_match_burned_tokens: false,
-    min_vote_confirmations: 0,
-    duplicate_votes: countDuplicatedTraditionalVotes(election.id),
-    centralized_records: votes.length,
-    personal_data_exposed: voters.length
-  };
-}
-
 function validateChangeVotePayload(body: unknown) {
   const payload = body as { electionId?: unknown; fromChoice?: unknown; toChoice?: unknown };
   const electionId = typeof payload?.electionId === "string" ? payload.electionId : "";
@@ -391,24 +245,6 @@ function validateChoiceExists(election: { candidates: { number: string }[] }, ch
   if (!election.candidates.some((candidate) => candidate.number === choice)) {
     throw new HttpError(400, "ATTACK_CHOICE_NOT_FOUND", "A opção informada não existe nesta eleição.");
   }
-}
-
-function getTraditionalVoterForPrivateKey(electionId: string, privateKeySimulation: unknown) {
-  if (typeof privateKeySimulation !== "string" || !privateKeySimulation.trim()) {
-    throw new HttpError(400, "PRIVATE_KEY_REQUIRED", "A chave privada é obrigatória.");
-  }
-
-  const normalizedPrivateKey = privateKeySimulation.trim();
-  const publicKey = derivePublicKey(normalizedPrivateKey);
-  const voter = traditionalStore
-    .all()
-    .voters.find((item) => item.electionId === electionId && item.publicKey === publicKey);
-
-  if (!voter) {
-    throw new HttpError(404, "VOTER_NOT_REGISTERED", "Eleitor não cadastrado para esta eleição.");
-  }
-
-  return { voter, publicKey, privateKeySimulation: normalizedPrivateKey };
 }
 
 function parseNodeCommandPayload(body: unknown) {
@@ -444,10 +280,6 @@ function parseNodeCommand(command: string) {
     return { type: "change_vote" as const, fromChoice, toChoice };
   }
 
-  if (action === "comprometer-banco") {
-    return { type: "compromise_db" as const };
-  }
-
   return { type: "unrecognized" as const };
 }
 
@@ -459,14 +291,12 @@ function quoteShell(value: string) {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }
 
-function apiBaseForMode(mode: "votify" | "votifalho") {
-  const base = `http://127.0.0.1:${env.port}${env.apiPrefix}`;
-  return mode === "votifalho" ? `${base}/traditional` : base;
+function apiBase() {
+  return `http://127.0.0.1:${env.port}${env.apiPrefix}`;
 }
 
-function buildWindowsTerminalScript(mode: "votify" | "votifalho", electionId: string, command: string) {
-  const changeVoteUrl = `${apiBaseForMode(mode)}/maintenance/change-vote`;
-  const label = mode === "votifalho" ? "Votifalho" : "Votify";
+function buildWindowsTerminalScript(electionId: string, command: string) {
+  const changeVoteUrl = `${apiBase()}/maintenance/change-vote`;
 
   return `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -492,35 +322,17 @@ function alterar-voto {
   }
 }
 function status {
-  Write-Output ${quotePowerShell(`Terminal conectado ao ${label}.`)}
+  Write-Output ${quotePowerShell("Terminal conectado ao Votify.")}
 }
 function ajuda {
-  Write-Output 'Comandos auxiliares: alterar-voto <origem> <destino>, derrubar-banco, status, ajuda. Outros comandos do PowerShell tambem sao executados.'
-}
-function derrubar-banco {
-  if (${quotePowerShell(mode)} -eq 'votifalho') {
-    Remove-Item -Force -ErrorAction SilentlyContinue ./data/traditional-db.json
-    Write-Output 'Banco de dados central apagado com sucesso. Sistema comprometido.'
-  } else {
-    Write-Output 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
-  }
-}
-function comprometer-banco {
-  if (${quotePowerShell(mode)} -eq 'votifalho') {
-    $body = @{ electionId = ${quotePowerShell(electionId)}; command = "comprometer-banco" } | ConvertTo-Json -Compress
-    $response = Invoke-RestMethod -Uri ${quotePowerShell(apiBaseForMode(mode) + "/maintenance/node-command")} -Method Post -ContentType 'application/json; charset=utf-8' -Body $body
-    Write-Output 'Banco de dados central comprometido. 10 votos injetados com sucesso.'
-  } else {
-    Write-Output 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
-  }
+  Write-Output 'Comandos auxiliares: alterar-voto <origem> <destino>, status, ajuda. Outros comandos do PowerShell tambem sao executados.'
 }
 ${command}
 `;
 }
 
-function buildUnixTerminalScript(mode: "votify" | "votifalho", electionId: string, command: string) {
-  const changeVoteUrl = `${apiBaseForMode(mode)}/maintenance/change-vote`;
-  const label = mode === "votifalho" ? "Votifalho" : "Votify";
+function buildUnixTerminalScript(electionId: string, command: string) {
+  const changeVoteUrl = `${apiBase()}/maintenance/change-vote`;
 
   return `
 alterar-voto() {
@@ -533,28 +345,10 @@ alterar-voto() {
     --data '{"electionId":${JSON.stringify(electionId)},"fromChoice":"'"$1"'","toChoice":"'"$2"'"}'
 }
 status() {
-  echo ${quoteShell(`Terminal conectado ao ${label}.`)}
+  echo ${quoteShell("Terminal conectado ao Votify.")}
 }
 ajuda() {
-  echo 'Comandos auxiliares: alterar-voto <origem> <destino>, derrubar-banco, status, ajuda. Outros comandos do shell tambem sao executados.'
-}
-derrubar-banco() {
-  if [ ${quoteShell(mode)} = 'votifalho' ]; then
-    rm -f ./data/traditional-db.json
-    echo 'Banco de dados central apagado com sucesso. Sistema comprometido.'
-  else
-    echo 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
-  fi
-}
-comprometer-banco() {
-  if [ ${quoteShell(mode)} = 'votifalho' ]; then
-    curl -sS -X POST ${quoteShell(apiBaseForMode(mode) + "/maintenance/node-command")} \
-      -H 'Content-Type: application/json' \
-      --data '{"electionId":${JSON.stringify(electionId)},"command":"comprometer-banco"}' > /dev/null
-    echo 'Banco de dados central comprometido. 10 votos injetados com sucesso.'
-  else
-    echo 'Este comando nao tem efeito na blockchain. Use o painel de "Controle de nos" em vez disso.'
-  fi
+  echo 'Comandos auxiliares: alterar-voto <origem> <destino>, status, ajuda. Outros comandos do shell tambem sao executados.'
 }
 ${command}
 `;
@@ -570,7 +364,7 @@ function statusFromTerminal(stdout: string, exitCode: number): "accepted" | "blo
   }
 
   if (/n.o permitiu|blockchain.*permitiu|bloquead/i.test(stdout)) return "blocked";
-  if (/alterou|centralizado/i.test(stdout)) return "accepted";
+  if (/alterou/i.test(stdout)) return "accepted";
 
   return exitCode === 0 ? "ok" : "blocked";
 }
@@ -586,18 +380,18 @@ function messageFromTerminal(stdout: string, fallback: string) {
   return fallback;
 }
 
-function runTerminalCommand(mode: "votify" | "votifalho", electionId: string, command: string) {
+function runTerminalCommand(electionId: string, command: string) {
   const isWindows = process.platform === "win32";
   const file = isWindows ? "powershell.exe" : "/bin/sh";
   const script = isWindows
-    ? buildWindowsTerminalScript(mode, electionId, command)
-    : buildUnixTerminalScript(mode, electionId, command);
+    ? buildWindowsTerminalScript(electionId, command)
+    : buildUnixTerminalScript(electionId, command);
   const args = isWindows
     ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]
     : ["-lc", script];
 
   return new Promise<{
-    system: "votify" | "votifalho";
+    system: "votify";
     command: string;
     status: "accepted" | "blocked" | "ok";
     message: string;
@@ -619,7 +413,7 @@ function runTerminalCommand(mode: "votify" | "votifalho", electionId: string, co
         const exitCode = typeof code === "number" ? code : error ? 1 : 0;
         const status = statusFromTerminal(stdout, exitCode);
         resolve({
-          system: mode,
+          system: "votify",
           command,
           status,
           message: messageFromTerminal(stdout, exitCode === 0 ? "Comando executado." : "Comando finalizado com erro."),
@@ -669,393 +463,6 @@ router.post("/auth/login", (req, res, next) => {
 
 router.get("/auth/me", requireAuth, (req: AuthenticatedRequest, res) => {
   res.json({ data: safePublicUser(req.user!) });
-});
-
-traditionalRouter.post("/auth/login", (req, res, next) => {
-  try {
-    const { email, password } = req.body ?? {};
-    const user = store.all().users.find((item) => item.email === email && item.password === password);
-    if (!user) {
-      throw new HttpError(401, "AUTH_INVALID_CREDENTIALS", "E-mail ou senha inválidos.");
-    }
-
-    res.json({
-      data: {
-        accessToken: user.token,
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        user: safePublicUser(user)
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-traditionalRouter.post("/crypto/public-key", (req, res) => {
-  const { privateKeySimulation } = req.body ?? {};
-  if (!privateKeySimulation) {
-    throw new HttpError(400, "PRIVATE_KEY_REQUIRED", "A chave privada é obrigatória.");
-  }
-  res.json({ data: { publicKey: derivePublicKey(privateKeySimulation) } });
-});
-
-traditionalRouter.get("/elections", requireAuth, (req, res) => {
-  const status = typeof req.query.status === "string" ? req.query.status : undefined;
-  const elections = status
-    ? traditionalStore.all().elections.filter((item) => item.status === status)
-    : traditionalStore.all().elections;
-
-  res.json({ data: elections, meta: { total: elections.length } });
-});
-
-traditionalRouter.get("/elections/:electionId", requireAuth, (req, res, next) => {
-  try {
-    res.json({ data: getTraditionalElectionOrThrow(routeParam(req.params.electionId, "electionId")) });
-  } catch (error) {
-    next(error);
-  }
-});
-
-traditionalRouter.put(
-  "/admin/elections/:electionId/ballot",
-  requireAuth,
-  requireRole("ADMIN"),
-  (req, res, next) => {
-    try {
-      const election = getTraditionalElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-      const { title, candidates } = req.body ?? {};
-
-      const normalizedTitle = typeof title === "string" ? title.trim() : "";
-      if (!normalizedTitle || !Array.isArray(candidates)) {
-        throw new HttpError(400, "BALLOT_INVALID_PAYLOAD", "Título e lista de opções são obrigatórios.");
-      }
-
-      const normalizedCandidates = candidates.map((candidate) => {
-        const name = typeof candidate?.name === "string" ? candidate.name.trim() : "";
-        const number = typeof candidate?.number === "string" ? candidate.number.trim() : "";
-
-        if (!name || !number) {
-          throw new HttpError(400, "BALLOT_INVALID_OPTION", "Cada opção precisa ter nome e código.");
-        }
-
-        return {
-          id: typeof candidate?.id === "string" && candidate.id ? candidate.id : randomUUID(),
-          electionId: election.id,
-          name,
-          number,
-          description: typeof candidate?.description === "string" ? candidate.description : null
-        };
-      });
-
-      const db = traditionalStore.all();
-      const dbElection = db.elections.find(e => e.id === election.id);
-      if (dbElection) {
-        dbElection.title = normalizedTitle;
-        dbElection.candidates = normalizedCandidates;
-        dbElection.updatedAt = now();
-        traditionalStore.save(db);
-      }
-      emitVisualEvent("ballot_saved", "votifalho", {
-        options: normalizedCandidates.length
-      });
-
-      res.json({ data: election });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-traditionalRouter.post(
-  "/admin/elections/:electionId/voters",
-  requireAuth,
-  requireRole("ADMIN"),
-  (req, res, next) => {
-    try {
-      const election = getTraditionalElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-      const { cpf, publicKey } = req.body ?? {};
-      if (!cpf || !publicKey) {
-        throw new HttpError(400, "VOTER_INVALID_PAYLOAD", "CPF e chave pública são obrigatórios.");
-      }
-
-      const voter = {
-        id: randomUUID(),
-        electionId: election.id,
-        cpf,
-        publicKey,
-        createdAt: now()
-      };
-
-      const db = traditionalStore.all();
-      db.voters.push(voter);
-      traditionalStore.save(db);
-      emitVisualEvent("voter_registration", "votifalho");
-
-      res.status(201).json({
-        data: {
-          id: voter.id,
-          electionId: election.id,
-          cpf: voter.cpf,
-          publicKey: voter.publicKey
-        }
-      });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-traditionalRouter.post("/elections/:electionId/votes", requireAuth, (req, res, next) => {
-  try {
-    const election = getTraditionalElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-    const { choice, privateKeySimulation } = req.body ?? {};
-
-    if (!choice) {
-      throw new HttpError(400, "VOTE_INVALID_PAYLOAD", "Escolha do voto é obrigatória.");
-    }
-
-    if (election.candidates.length === 0) {
-      throw new HttpError(400, "BALLOT_NOT_CONFIGURED", "A eleição ainda não possui opções de voto cadastradas.");
-    }
-
-    if (!election.candidates.some((candidate) => candidate.number === choice)) {
-      throw new HttpError(400, "VOTE_CHOICE_NOT_FOUND", "A opção de voto selecionada não existe nesta eleição.");
-    }
-
-    const voterProof = getTraditionalVoterForPrivateKey(election.id, privateKeySimulation);
-    const alreadyVoted = traditionalStore
-      .all()
-      .votes.some(
-        (vote) =>
-          vote.electionId === election.id &&
-          (vote.voterId === voterProof.voter.id ||
-            vote.publicKey === voterProof.publicKey ||
-            vote.privateKeySimulation === voterProof.privateKeySimulation)
-      );
-
-    if (alreadyVoted) {
-      throw new HttpError(409, "VOTE_ALREADY_CAST", "O eleitor não pode votar duas vezes.");
-    }
-
-    const createdAt = now();
-    const txid = randomUUID().replace(/-/g, "");
-    const receiptHash = fakeReceiptHash(txid, String(choice), createdAt);
-    const vote = {
-      id: randomUUID(),
-      electionId: election.id,
-      choice: String(choice),
-      voterId: voterProof.voter.id,
-      publicKey: voterProof.publicKey,
-      privateKeySimulation: voterProof.privateKeySimulation,
-      txid,
-      receiptHash,
-      createdAt
-    };
-
-    const db = traditionalStore.all();
-    db.votes.push(vote);
-    traditionalStore.save(db);
-    emitVisualEvent("vote_cast", "votifalho");
-    setTimeout(() => emitVisualEvent("vote_confirmed", "votifalho"), 3000);
-
-    res.status(201).json({
-      data: {
-        status: "vote_sent",
-        txid,
-        receipt: {
-          txid,
-          status: "registered",
-          blockheight: null,
-          confirmations: 0,
-          receipt_hash: receiptHash
-        }
-      }
-    });
-  } catch (error) {
-    emitVisualEvent("vote_rejected", "votifalho", {
-      reason: visualErrorCode(error)
-    });
-    next(error);
-  }
-});
-
-traditionalRouter.get("/elections/:electionId/votes/:txid/receipt", requireAuth, (req, res, next) => {
-  try {
-    const election = getTraditionalElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-    const txid = routeParam(req.params.txid, "txid");
-    const vote = traditionalStore.all().votes.find((item) => item.electionId === election.id && item.txid === txid);
-    if (!vote) {
-      throw new HttpError(404, "RECEIPT_NOT_FOUND", "Comprovante não encontrado.");
-    }
-
-    res.json({
-      data: {
-        txid: vote.txid,
-        status: "registered",
-        blockheight: null,
-        confirmations: 0,
-        receipt_hash: vote.receiptHash
-      }
-    });
-  } catch (error) {
-    if (req.query.visual === "1") {
-      emitVisualEvent("receipt_rejected", "votifalho", {
-        reason: "Comprovante não encontrado"
-      });
-    }
-    next(error);
-  }
-});
-
-traditionalRouter.get(
-  "/elections/:electionId/audit",
-  requireAuth,
-  requireRole("ADMIN", "AUDITOR"),
-  (req, res, next) => {
-    try {
-      res.json({ data: buildTraditionalAudit(routeParam(req.params.electionId, "electionId")) });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-traditionalRouter.post("/maintenance/change-vote", (req, res, next) => {
-  try {
-    const { electionId, fromChoice, toChoice } = validateChangeVotePayload(req.body);
-    const election = getTraditionalElectionOrThrow(electionId);
-    validateChoiceExists(election, fromChoice);
-    validateChoiceExists(election, toChoice);
-
-    const before = buildTraditionalAudit(election.id);
-    const db = traditionalStore.all();
-    const voteRef = db.votes.find((item) => item.electionId === election.id && item.choice === fromChoice);
-
-    if (!voteRef) {
-      throw new HttpError(404, "ATTACK_TARGET_NOT_FOUND", "Nenhum voto de origem foi encontrado para alterar.");
-    }
-
-    voteRef.choice = toChoice;
-    voteRef.receiptHash = fakeReceiptHash(voteRef.txid, voteRef.choice, voteRef.createdAt);
-    traditionalStore.save(db);
-    emitVisualEvent("vote_change_attempt", "votifalho", {
-      accepted: true
-    });
-
-    res.json({
-      data: {
-        system: "votifalho",
-        attack: "change_vote",
-        status: "accepted",
-        message: "O voto foi alterado diretamente no banco centralizado.",
-        modifiedTxid: voteRef.txid,
-        before,
-        after: buildTraditionalAudit(election.id)
-      }
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-traditionalRouter.post("/maintenance/node-command", async (req, res, next) => {
-  try {
-    const { electionId, command } = parseNodeCommandPayload(req.body);
-    const parsed = parseNodeCommand(command);
-    if (parsed.type === "unrecognized") {
-      getTraditionalElectionOrThrow(electionId);
-      res.json({ data: await runTerminalCommand("votifalho", electionId, command) });
-      return;
-    }
-    const election = getTraditionalElectionOrThrow(electionId);
-
-    if (parsed.type === "help") {
-      res.json({
-        data: {
-          system: "votifalho",
-          command,
-          status: "ok",
-          message: "Comandos disponíveis: status, alterar-voto <origem> <destino>."
-        }
-      });
-      return;
-    }
-
-    if (parsed.type === "status") {
-      const audit = buildTraditionalAudit(election.id);
-      res.json({
-        data: {
-          system: "votifalho",
-          command,
-          status: "ok",
-          message: `Banco centralizado respondeu com ${audit.votes_total} voto(s) registrado(s).`,
-          audit
-        }
-      });
-      return;
-    }
-
-    if (parsed.type === "compromise_db") {
-      const choice = election.candidates[0]?.number ?? "1";
-      const db = traditionalStore.all();
-      
-      for (let i = 0; i < 10; i++) {
-        db.votes.push({
-          id: randomUUID(),
-          electionId: election.id,
-          txid: randomUUID(),
-          choice,
-          voterId: randomUUID(),
-          privateKeySimulation: null,
-          receiptHash: "FAKE_HASH_COMPROMISED",
-          createdAt: now()
-        });
-      }
-      
-      traditionalStore.save(db);
-      
-      res.json({
-        data: {
-          system: "votifalho",
-          command,
-          status: "accepted",
-          message: "10 votos foram injetados diretamente no banco centralizado."
-        }
-      });
-      return;
-    }
-
-    if (parsed.type === "change_vote") {
-      validateChoiceExists(election, parsed.fromChoice);
-      validateChoiceExists(election, parsed.toChoice);
-
-      const before = buildTraditionalAudit(election.id);
-      const db = traditionalStore.all();
-      const voteRef = db.votes.find((item) => item.electionId === election.id && item.choice === parsed.fromChoice);
-
-      if (!voteRef) {
-        throw new HttpError(404, "NODE_COMMAND_TARGET_NOT_FOUND", "Nenhum voto de origem foi encontrado para alterar.");
-      }
-
-      voteRef.choice = parsed.toChoice;
-      voteRef.receiptHash = fakeReceiptHash(voteRef.txid, voteRef.choice, voteRef.createdAt);
-      traditionalStore.save(db);
-
-      res.json({
-        data: {
-          system: "votifalho",
-          command,
-          status: "accepted",
-          message: "O comando alterou o voto diretamente no banco centralizado.",
-          before,
-          after: buildTraditionalAudit(election.id)
-        }
-      });
-      return;
-    }
-  } catch (error) {
-    next(error);
-  }
 });
 
 router.post("/crypto/public-key", (req, res) => {
@@ -1121,7 +528,6 @@ router.post("/admin/elections", requireAuth, requireRole("ADMIN"), (req, res, ne
 
     store.all().elections.push(election);
     store.save();
-    syncTraditionalElectionFromVotify(election);
     res.status(201).json({ data: election });
   } catch (error) {
     next(error);
@@ -1139,7 +545,6 @@ router.patch("/admin/elections/:electionId", requireAuth, requireRole("ADMIN"), 
     if (endsAt) election.endsAt = endsAt;
     election.updatedAt = now();
     store.save();
-    syncTraditionalElectionFromVotify(election);
     res.json({ data: election });
   } catch (error) {
     next(error);
@@ -1193,7 +598,6 @@ router.put("/admin/elections/:electionId/ballot", requireAuth, requireRole("ADMI
     election.candidates = normalizedCandidates;
     election.updatedAt = now();
     store.save();
-    syncTraditionalElectionFromVotify(election);
     emitVisualEvent("ballot_saved", "votify", {
       options: normalizedCandidates.length
     });
@@ -1224,7 +628,6 @@ router.post("/admin/elections/:electionId/candidates", requireAuth, requireRole(
     election.candidates.push(candidate);
     election.updatedAt = now();
     store.save();
-    syncTraditionalElectionFromVotify(election);
     res.status(201).json({ data: candidate });
   } catch (error) {
     next(error);
@@ -1257,7 +660,6 @@ router.post("/admin/elections/:electionId/voters", requireAuth, requireRole("ADM
 
     store.all().voters.push(voter);
     store.save();
-    syncTraditionalVoterFromVotify(election, String(cpf), String(publicKey));
     emitVisualEvent("voter_registration", "votify");
     res.status(201).json({
       data: {
@@ -1733,7 +1135,7 @@ router.post("/maintenance/node-command", async (req, res, next) => {
     const parsed = parseNodeCommand(command);
     if (parsed.type === "unrecognized") {
       getElectionOrThrow(electionId);
-      res.json({ data: await runTerminalCommand("votify", electionId, command) });
+      res.json({ data: await runTerminalCommand(electionId, command) });
       return;
     }
     const election = getElectionOrThrow(electionId);
@@ -1814,21 +1216,10 @@ router.post("/maintenance/node-command", async (req, res, next) => {
       return;
     }
 
-    res.json({ data: await runTerminalCommand("votify", electionId, command) });
+    res.json({ data: await runTerminalCommand(electionId, command) });
   } catch (error) {
     next(error);
   }
-});
-
-traditionalRouter.get("/blockchain/status", requireAuth, requireRole("ADMIN", "AUDITOR"), (_req, res) => {
-  res.json({
-    data: {
-      chain: "banco-centralizado",
-      blocks: 0,
-      peers: 0,
-      mode: "traditional"
-    }
-  });
 });
 
 router.get("/blockchain/status", requireAuth, requireRole("ADMIN", "AUDITOR"), async (_req, res, next) => {
@@ -1838,8 +1229,6 @@ router.get("/blockchain/status", requireAuth, requireRole("ADMIN", "AUDITOR"), a
     next(error);
   }
 });
-
-router.use("/traditional", traditionalRouter);
 
 app.use(env.apiPrefix, router);
 

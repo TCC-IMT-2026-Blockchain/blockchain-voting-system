@@ -127,15 +127,6 @@ label {
   padding: 28px 22px 44px;
 }
 
-.shell.mode-failure {
-  --accent: #b91c1c;
-  --accent-soft: #f7dede;
-  --danger: #7f1d1d;
-  --danger-soft: #f6dada;
-  --line: #e1caca;
-  --soft: #f3e8e8;
-}
-
 .topbar {
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -157,41 +148,6 @@ label {
   display: block;
   height: auto;
   width: 168px;
-}
-
-.mode-switch {
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--soft);
-  display: inline-flex;
-  height: 30px;
-  min-height: 30px;
-  padding: 3px;
-  width: 56px;
-}
-
-.mode-switch span {
-  background: var(--ink);
-  border-radius: 999px;
-  display: block;
-  height: 22px;
-  transition: transform 150ms ease;
-  width: 22px;
-}
-
-.mode-switch:hover:not(:disabled) {
-  background: var(--accent-soft);
-  transform: none;
-}
-
-.mode-switch.on span {
-  background: var(--accent);
-  transform: translateX(26px);
-}
-
-.mode-switch:disabled {
-  cursor: default;
 }
 
 .footer-links {

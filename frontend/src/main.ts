@@ -1,13 +1,10 @@
 import "./styles.css";
 import logoVotifyUrl from "./assets/logo-votify.png";
-import logoVotifalhoUrl from "./assets/logo-votifalho.png";
 import faviconVotifyUrl from "./assets/votify_logo.png";
-import faviconVotifalhoUrl from "./assets/votifalho_logo.png";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3333/api/v1";
 
 type RouteName = "voto" | "configuracao" | "auditoria" | "admin" | "comprovante";
-type SystemMode = "votify" | "votifalho";
 
 type Election = {
   id: string;
@@ -54,9 +51,6 @@ type AuditReport = {
   credentials_issued?: number;
   votes_match_burned_tokens?: boolean;
   min_vote_confirmations?: number | null;
-  duplicate_votes?: number;
-  centralized_records?: number;
-  personal_data_exposed?: number;
   compromised_report?: boolean;
   compromise_note?: string;
 };
@@ -86,7 +80,7 @@ type ConsensusAudit = {
 };
 
 type AttackResult = {
-  system: SystemMode;
+  system: "votify";
   attack: "change_vote";
   status: "accepted" | "blocked";
   message: string;
@@ -99,7 +93,7 @@ type AttackResult = {
 };
 
 type NodeCommandResult = {
-  system: SystemMode;
+  system: "votify";
   command: string;
   status: "accepted" | "blocked" | "ok";
   message: string;
@@ -118,18 +112,9 @@ type DemoVoter = {
 };
 
 const DEMO_VOTERS_STORAGE_KEY = "votify_demo_voters";
-const SYSTEM_MODE_STORAGE_KEY = "votify_system_mode";
 
-function loadSystemMode(): SystemMode {
-  return localStorage.getItem(SYSTEM_MODE_STORAGE_KEY) === "votifalho" ? "votifalho" : "votify";
-}
-
-function demoVotersStorageKey(mode: SystemMode) {
-  return `${DEMO_VOTERS_STORAGE_KEY}:${mode}`;
-}
-
-function loadDemoVoters(mode: SystemMode): DemoVoter[] {
-  const raw = localStorage.getItem(demoVotersStorageKey(mode));
+function loadDemoVoters(): DemoVoter[] {
+  const raw = localStorage.getItem(DEMO_VOTERS_STORAGE_KEY);
   if (!raw) return [];
 
   try {
@@ -145,23 +130,20 @@ function loadDemoVoters(mode: SystemMode): DemoVoter[] {
   }
 }
 
-function saveDemoVoters(mode: SystemMode, voters: DemoVoter[]) {
-  localStorage.setItem(demoVotersStorageKey(mode), JSON.stringify(voters));
+function saveDemoVoters(voters: DemoVoter[]) {
+  localStorage.setItem(DEMO_VOTERS_STORAGE_KEY, JSON.stringify(voters));
 }
 
-function addDemoVoterToMode(mode: SystemMode, voter: DemoVoter) {
-  const voters = loadDemoVoters(mode).filter(
+function addDemoVoter(voter: DemoVoter) {
+  const voters = loadDemoVoters().filter(
     (item) => item.cpf !== voter.cpf && item.privateKey !== voter.privateKey
   );
   const updated = [voter, ...voters];
-  saveDemoVoters(mode, updated);
+  saveDemoVoters(updated);
   return updated;
 }
 
-const initialMode = loadSystemMode();
-
 const state = {
-  mode: initialMode,
   adminToken: "",
   electorToken: "",
   election: null as Election | null,
@@ -181,7 +163,7 @@ const state = {
   attackResult: null as AttackResult | null,
   nodeCommand: "",
   nodeCommandResult: null as NodeCommandResult | null,
-  demoVoters: loadDemoVoters(initialMode),
+  demoVoters: loadDemoVoters(),
   ballotTitle: "",
   ballotCandidates: [] as CandidateDraft[],
   auditSearchTxid: "",
@@ -194,14 +176,6 @@ const state = {
 };
 
 let polling = false;
-
-function activeApiBase() {
-  return state.mode === "votifalho" ? `${API_BASE}/traditional` : API_BASE;
-}
-
-function activeLogoUrl() {
-  return state.mode === "votifalho" ? logoVotifalhoUrl : logoVotifyUrl;
-}
 
 function isElectionLocked() {
   return Boolean(state.election?.governanceLockedAt);
@@ -229,7 +203,7 @@ function escapeHtml(value: string) {
 }
 
 async function api<T>(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${activeApiBase()}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -312,51 +286,6 @@ function normalizeAttackChoices() {
   }
 }
 
-function resetRuntimeStateForMode(mode: SystemMode) {
-  state.mode = mode;
-  state.adminToken = "";
-  state.electorToken = "";
-  state.election = null;
-  state.publicKey = "";
-  state.selectedChoice = "";
-  state.txid = "";
-  state.receipt = null;
-  state.printStatus = null;
-  state.printError = null;
-  state.audit = null;
-  state.consensus = null;
-  state.attackFromChoice = "";
-  state.attackToChoice = "";
-  state.attackResult = null;
-  state.nodeCommand = "";
-  state.nodeCommandResult = null;
-  state.demoVoters = loadDemoVoters(mode);
-  state.ballotTitle = "";
-  state.ballotCandidates = [];
-  state.auditSearchTxid = "";
-  state.auditSearchHash = "";
-  state.auditSearchResult = null;
-  state.auditSearchError = "";
-  state.initialized = false;
-  state.error = "";
-}
-
-async function switchMode(mode: SystemMode) {
-  if (state.mode === mode || state.busy) return;
-
-  localStorage.setItem(SYSTEM_MODE_STORAGE_KEY, mode);
-  resetRuntimeStateForMode(mode);
-  
-  document.title = mode === "votifalho" ? "Votifalho" : "Votify";
-  const faviconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-  if (faviconLink) {
-    faviconLink.href = mode === "votifalho" ? faviconVotifalhoUrl : faviconVotifyUrl;
-  }
-  
-  render();
-  await initialize();
-}
-
 async function initialize() {
   if (state.initialized) return;
 
@@ -370,7 +299,7 @@ async function initialize() {
     state.election = elections.data[0] ?? null;
     if (state.election) {
       state.demoVoters = state.demoVoters.filter(v => v.electionId === state.election!.id);
-      saveDemoVoters(state.mode, state.demoVoters);
+      saveDemoVoters(state.demoVoters);
     }
 
     syncBallotDraft();
@@ -412,10 +341,7 @@ async function registerVoter() {
     state.configPrivateKey = "";
     
     const voter = { cpf: cpfToSave, privateKey: pkToSave, electionId: state.election!.id };
-    state.demoVoters = addDemoVoterToMode(state.mode, voter);
-    if (state.mode === "votify") {
-      addDemoVoterToMode("votifalho", voter);
-    }
+    state.demoVoters = addDemoVoter(voter);
   });
 }
 
@@ -440,7 +366,7 @@ async function saveBallot() {
 }
 
 async function lockElection() {
-  if (!state.election || state.mode !== "votify" || isElectionLocked()) return;
+  if (!state.election || isElectionLocked()) return;
 
   await withBusy(async () => {
     const result = await api<{ data: { election: Election } }>(`/admin/elections/${state.election!.id}/lock`, {
@@ -523,17 +449,13 @@ async function refreshAuditAndStatus(visual = false) {
   });
   state.audit = audit.data;
 
-  if (state.mode === "votify") {
-    const consensus = await api<{ data: ConsensusAudit }>(
-      `/elections/${state.election.id}/audit/consensus${visual ? "?visual=1" : ""}`,
-      {
-        headers: { Authorization: `Bearer ${state.adminToken}` }
-      }
-    );
-    state.consensus = consensus.data;
-  } else {
-    state.consensus = null;
-  }
+  const consensus = await api<{ data: ConsensusAudit }>(
+    `/elections/${state.election.id}/audit/consensus${visual ? "?visual=1" : ""}`,
+    {
+      headers: { Authorization: `Bearer ${state.adminToken}` }
+    }
+  );
+  state.consensus = consensus.data;
 }
 
 async function refreshRouteData() {
@@ -620,7 +542,7 @@ function fillRandomVoter() {
 
 function clearDemoVoters() {
   state.demoVoters = [];
-  localStorage.removeItem(demoVotersStorageKey(state.mode));
+  localStorage.removeItem(DEMO_VOTERS_STORAGE_KEY);
   render();
 }
 
@@ -683,26 +605,8 @@ async function executeNodeCommand() {
   });
 }
 
-async function executeCompromiseCentralDb() {
-  if (!state.election || state.mode !== "votifalho") return;
-
-  const choice = state.election.candidates[0]?.number ?? "1";
-  await withBusy(async () => {
-    const result = await api<{ data: NodeCommandResult }>("/maintenance/node-command", {
-      method: "POST",
-      body: JSON.stringify({
-        electionId: state.election!.id,
-        command: "comprometer-banco"
-      })
-    });
-
-    state.nodeCommandResult = result.data;
-    await refreshAuditAndStatus();
-  });
-}
-
 async function compromiseFiscalNode() {
-  if (!state.election || state.mode !== "votify") return;
+  if (!state.election) return;
 
   const choice = state.election.candidates[0]?.number ?? "1";
   await withBusy(async () => {
@@ -720,8 +624,6 @@ async function compromiseFiscalNode() {
 }
 
 async function stopFiscalNode() {
-  if (state.mode !== "votify") return;
-
   await withBusy(async () => {
     await api("/admin/nodes/fiscal-2/offline", {
       method: "POST",
@@ -732,8 +634,6 @@ async function stopFiscalNode() {
 }
 
 async function restoreFiscalNode() {
-  if (state.mode !== "votify") return;
-
   await withBusy(async () => {
     await api("/admin/nodes/fiscal-2/restore", {
       method: "POST",
@@ -800,36 +700,18 @@ function renderReceipt() {
 
   const isBlockConfirmed = receipt.blockheight != null;
 
-  if (state.mode === "votifalho") {
-    return `
-      <div class="receipt-card">
-        <div class="receipt-head">
-          <span class="status-dot ${isRegistered ? "ok" : ""}"></span>
-          <strong>${statusLabel}</strong>
-        </div>
-        <div class="receipt-grid">
-          <div><span>ID do registro</span><strong class="selectable">${escapeHtml(state.txid)}</strong></div>
-          <div><span>Status</span><strong>${statusLabel}</strong></div>
-          <div><span>Hash local</span><strong class="selectable">${escapeHtml(receipt.receipt_hash ?? receipt.receiptHash ?? "")}</strong></div>
-        </div>
+  let printHtml = "";
+  if (state.printStatus === "failed") {
+    printHtml = `
+      <div class="notice error" style="margin-top: 1rem;">
+        <p>${escapeHtml(state.printError || "Não foi possível imprimir seu comprovante físico. Seu voto foi registrado normalmente.")}</p>
+        <button id="reprintReceipt" class="secondary" style="margin-top: 0.5rem;" ${state.busy ? "disabled" : ""}>Reimprimir comprovante</button>
       </div>
     `;
-  }
-
-  let printHtml = "";
-  if (state.mode === "votify") {
-    if (state.printStatus === "failed") {
-      printHtml = `
-        <div class="notice error" style="margin-top: 1rem;">
-          <p>${escapeHtml(state.printError || "Não foi possível imprimir seu comprovante físico. Seu voto foi registrado normalmente.")}</p>
-          <button id="reprintReceipt" class="secondary" style="margin-top: 0.5rem;" ${state.busy ? "disabled" : ""}>Reimprimir comprovante</button>
-        </div>
-      `;
-    } else if (state.printStatus === "success") {
-      printHtml = `<div class="notice success" style="margin-top: 1rem;">Comprovante impresso com sucesso. Retire na impressora.</div>`;
-    } else if (state.printStatus === "pending") {
-      printHtml = `<div class="notice info" style="margin-top: 1rem;">Enviando para impressão...</div>`;
-    }
+  } else if (state.printStatus === "success") {
+    printHtml = `<div class="notice success" style="margin-top: 1rem;">Comprovante impresso com sucesso. Retire na impressora.</div>`;
+  } else if (state.printStatus === "pending") {
+    printHtml = `<div class="notice info" style="margin-top: 1rem;">Enviando para impressão...</div>`;
   }
 
   return `
@@ -846,7 +728,7 @@ function renderReceipt() {
         </div>
         ${receipt.qrCodeBase64 ? `<div style="text-align: center; margin-top: 0.5rem;"><img src="${receipt.qrCodeBase64}" style="width: 150px; height: 150px; display: inline-block; border-radius: 4px;" alt="QR Code" /></div>` : ""}
         ${printHtml}
-        ${state.mode === "votify" && state.txid && isBlockConfirmed && (receipt.receipt_hash || receipt.receiptHash) ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><button class="secondary" style="width: 100%;" onclick="window.location.href='/comprovante?token=' + btoa('${state.txid}:${receipt.receipt_hash ?? receipt.receiptHash ?? ""}')">Verificar Voto</button></div>` : ""}
+        ${state.txid && isBlockConfirmed && (receipt.receipt_hash || receipt.receiptHash) ? `<div style="margin-top: 1rem; display: flex; justify-content: center;"><button class="secondary" style="width: 100%;" onclick="window.location.href='/comprovante?token=' + btoa('${state.txid}:${receipt.receipt_hash ?? receipt.receiptHash ?? ""}')">Verificar Voto</button></div>` : ""}
       </div>
   `;
 }
@@ -898,21 +780,6 @@ function renderAuditSummary() {
   const votesTotal = audit.votes_total ?? 0;
   const credentialsIssued = audit.credentials_issued ?? 0;
   const burnedTokens = audit.tokens_burned_by_vote_transactions ?? 0;
-
-  if (state.mode === "votifalho") {
-    return `
-      <div class="metrics">
-        ${renderMetric("Votos no banco", votesTotal)}
-        ${renderMetric("Eleitores no banco", credentialsIssued)}
-        ${renderMetric("Duplicidades aceitas", audit.duplicate_votes ?? 0)}
-        ${renderMetric("Blockchain", "não usada")}
-      </div>
-      <section class="audit-section">
-        <h3>Contagem</h3>
-        ${renderVoteResults()}
-      </section>
-    `;
-  }
 
   return `
     <div class="metrics">
@@ -978,7 +845,6 @@ function renderNodeControls() {
 }
 
 function renderConsensusPanel(showNodeControls = false) {
-  if (state.mode !== "votify") return "";
   const consensus = state.consensus;
   if (!consensus) {
     return `
@@ -1093,16 +959,12 @@ function renderConfigPage() {
             <button id="addCandidate" class="secondary" ${state.busy || locked ? "disabled" : ""}>Adicionar opção</button>
             <button id="saveBallot" class="primary" ${!state.election || state.busy || locked ? "disabled" : ""}>Salvar eleição</button>
           </div>
-          ${
-            state.mode === "votify"
-              ? `<div class="lock-row">
-                  <span>${locked ? "Eleição travada" : "Configuração aberta"}</span>
-                  <button id="lockElection" class="primary" ${!state.election || state.busy || locked ? "disabled" : ""}>${
-                    locked ? "Travada" : "Travar eleição"
-                  }</button>
-                </div>`
-              : ""
-          }
+          <div class="lock-row">
+            <span>${locked ? "Eleição travada" : "Configuração aberta"}</span>
+            <button id="lockElection" class="primary" ${!state.election || state.busy || locked ? "disabled" : ""}>${
+              locked ? "Travada" : "Travar eleição"
+            }</button>
+          </div>
         </article>
       </div>
 
@@ -1279,7 +1141,7 @@ function renderVotePage() {
 
       <article class="panel">
         <div class="panel-title">
-          <h2>${state.mode === "votifalho" ? "Protocolo" : "Comprovante"}</h2>
+          <h2>Comprovante</h2>
         </div>
         ${renderReceipt()}
       </article>
@@ -1379,24 +1241,12 @@ function renderAdminPage() {
         </div>
       </article>
 
-      ${
-        state.mode === "votify"
-          ? `<article class="panel admin-node-panel">
-              <div class="panel-title">
-                <h2>Controle de nós</h2>
-              </div>
-              ${renderConsensusPanel(true)}
-            </article>`
-          : `<article class="panel admin-node-panel">
-              <div class="panel-title">
-                <h2>Simulação de Ataque</h2>
-              </div>
-              <div class="node-actions" style="margin-top: 1rem; display: flex; gap: 1rem;">
-                <button id="btnCompromiseDb" class="danger">Comprometer Banco</button>
-                <button id="btnDropDb" class="danger">Derrubar Banco</button>
-              </div>
-            </article>`
-      }
+      <article class="panel admin-node-panel">
+        <div class="panel-title">
+          <h2>Controle de nós</h2>
+        </div>
+        ${renderConsensusPanel(true)}
+      </article>
 
       <article class="panel admin-count">
         <div class="panel-title">
@@ -1406,23 +1256,6 @@ function renderAdminPage() {
       </article>
 
     </section>
-  `;
-}
-
-function renderModeSwitch() {
-  const nextMode = state.mode === "votify" ? "votifalho" : "votify";
-
-  return `
-    <button
-      id="modeSwitch"
-      class="mode-switch ${state.mode === "votifalho" ? "on" : ""}"
-      aria-label="Alternar modo do sistema"
-      title="Alternar modo do sistema"
-      data-next-mode="${nextMode}"
-      ${state.busy ? "disabled" : ""}
-    >
-      <span></span>
-    </button>
   `;
 }
 
@@ -1600,21 +1433,6 @@ function bindCommonEvents() {
   document.querySelector<HTMLButtonElement>("#compromiseNode")?.addEventListener("click", () => void compromiseFiscalNode());
   document.querySelector<HTMLButtonElement>("#stopNode")?.addEventListener("click", () => void stopFiscalNode());
   document.querySelector<HTMLButtonElement>("#restoreNode")?.addEventListener("click", () => void restoreFiscalNode());
-  document.querySelector<HTMLButtonElement>("#modeSwitch")?.addEventListener("click", (event) => {
-    const nextMode = (event.currentTarget as HTMLButtonElement).dataset.nextMode;
-    if (nextMode === "votify" || nextMode === "votifalho") {
-      void switchMode(nextMode);
-    }
-  });
-
-  document.querySelector<HTMLButtonElement>("#btnDropDb")?.addEventListener("click", () => {
-    state.nodeCommand = "derrubar-banco";
-    void executeNodeCommand();
-  });
-
-  document.querySelector<HTMLButtonElement>("#btnCompromiseDb")?.addEventListener("click", () => {
-    void executeCompromiseCentralDb();
-  });
 }
 
 function render() {
@@ -1622,12 +1440,11 @@ function render() {
   const currentRoute = route();
 
   app.innerHTML = `
-    <section class="shell ${state.mode === "votifalho" ? "mode-failure" : "mode-secure"}">
+    <section class="shell mode-secure">
       <header class="topbar">
         <a class="brand" href="/" aria-label="Votify">
-          <img src="${activeLogoUrl()}" alt="${state.mode === "votifalho" ? "Votifalho" : "Votify"}" />
+          <img src="${logoVotifyUrl}" alt="Votify" />
         </a>
-        ${renderModeSwitch()}
       </header>
 
       ${state.error ? `<div class="notice error">${escapeHtml(state.error)}</div>` : ""}
@@ -1688,10 +1505,10 @@ function connectSSE() {
   };
 }
 
-document.title = state.mode === "votifalho" ? "Votifalho" : "Votify";
+document.title = "Votify";
 const initialFaviconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
 if (initialFaviconLink) {
-  initialFaviconLink.href = state.mode === "votifalho" ? faviconVotifalhoUrl : faviconVotifyUrl;
+  initialFaviconLink.href = faviconVotifyUrl;
 }
 
 render();

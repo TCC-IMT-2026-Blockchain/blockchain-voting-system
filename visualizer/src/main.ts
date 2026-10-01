@@ -3,7 +3,7 @@ import logoVotifyUrl from "../../frontend/src/assets/logo-votify.png";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:3333/api/v1";
 
-type VisualSystem = "votify" | "votifalho";
+type VisualSystem = "votify";
 
 type VisualEventType =
   | "voter_registration"
@@ -314,10 +314,6 @@ function icon(name: IconName) {
 }
 
 
-function eventSystemLabel(system: VisualSystem) {
-  return system === "votifalho" ? "Votifalho" : "Votify";
-}
-
 function isFailureEvent(event: VisualEvent | null) {
   if (!event) return false;
   if (event.type === "vote_rejected") return true;
@@ -423,10 +419,10 @@ function renderHistory() {
   return history
     .map(
       (event) => `
-        <div class="feed-item ${event.system === "votifalho" || isFailureEvent(event) ? "failure" : ""}">
+        <div class="feed-item ${isFailureEvent(event) ? "failure" : ""}">
           <span>${formatTime(event.occurredAt)}</span>
           <strong>${titleForEvent(event)}</strong>
-          <small>${eventSystemLabel(event.system)}</small>
+          <small>Votify</small>
         </div>
       `
     )
@@ -437,7 +433,7 @@ function render() {
   const app = document.querySelector<HTMLElement>("#app");
   if (!app) return;
 
-  const systemClass = currentEvent?.system === "votifalho" || isFailureEvent(currentEvent) ? "system-failure" : "system-secure";
+  const systemClass = isFailureEvent(currentEvent) ? "system-failure" : "system-secure";
   app.innerHTML = `
     <main class="shell ${systemClass}">
       <header class="topbar">

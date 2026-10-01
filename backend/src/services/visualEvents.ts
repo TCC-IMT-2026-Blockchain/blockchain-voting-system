@@ -1,7 +1,7 @@
 import type { Response } from "express";
 import { randomUUID } from "node:crypto";
 
-export type VisualSystem = "votify" | "votifalho";
+export type VisualSystem = "votify";
 
 export type VisualEventType =
   | "voter_registration"
@@ -52,7 +52,7 @@ class VisualEventBus {
     this.clients.add(res);
     sendSse(res, "connected", {
       connected: true,
-      history: this.history.filter((event) => event.system === "votify").slice(-8)
+      history: this.history.slice(-8)
     });
 
     const heartbeat = setInterval(() => {
@@ -66,8 +66,6 @@ class VisualEventBus {
   }
 
   publish(input: VisualEventInput) {
-    if (input.system !== "votify") return null;
-
     const event: VisualEvent = {
       id: randomUUID(),
       occurredAt: input.occurredAt ?? new Date().toISOString(),
