@@ -227,36 +227,20 @@ Além disso, filtros nativos da MultiChain validam regras de integridade antes d
 Dessa forma, o fluxo de votação busca garantir segurança, privacidade, verificabilidade e auditabilidade do processo eleitoral.[cite: 3]
 
 ## Resultados[cite: 3]
-Para avaliar a eficácia da arquitetura proposta, os resultados obtidos pelo Votify foram submetidos a uma análise comparativa abordando dois cenários distintos. Primeiramente, o sistema foi contrastado com o modelo tradicional centralizado, representado no escopo deste trabalho pelo protótipo secundário denominado "Votifalho". Em seguida, realizou-se uma avaliação comparativa com a solução BlockVotes (WU, 2017), cujo modelo baseia-se em redes blockchain públicas. A análise pautou-se em critérios de integridade, prevenção contra o duplo voto, proteção da privacidade e viabilidade computacional.[cite: 3]
+Para avaliar a eficácia da arquitetura proposta, o Votify foi submetido a testes de integridade, prevenção contra o duplo voto, proteção da privacidade, tolerância a falhas e viabilidade computacional. Os resultados também foram comparados com a solução BlockVotes (WU, 2017), cujo modelo se baseia em redes blockchain públicas.[cite: 3]
 
 ### Avaliação de Integridade e Prevenção de Fraudes[cite: 3]
-A primeira etapa da validação consistiu em submeter o Votify e o Votifalho a tentativas simuladas de manipulação de dados e duplo voto. No sistema centralizado (Votifalho), cujos registros eleitorais dependem exclusivamente de um banco de dados relacional e das regras de negócio da camada de aplicação, evidenciou-se a vulnerabilidade do modelo. Foi possível demonstrar a viabilidade da inserção de múltiplos votos por um mesmo usuário, bem como a suscetibilidade à alteração de votos já registrados, simulando um comprometimento direto do banco de dados (single point of failure).[cite: 3]
+A primeira etapa da validação consistiu em submeter o Votify a tentativas simuladas de manipulação de dados e duplo voto. A integridade do pleito foi assegurada pelos mecanismos nativos da rede MultiChain. A emissão de uma credencial digital única para cada eleitor (representada pelo asset VOTE_ELEICAO_001) garantiu que o direito ao voto fosse exercido estritamente uma única vez. Durante a experimentação, qualquer tentativa de repetição de voto utilizando a mesma credencial foi sumariamente rejeitada na camada de consenso da rede através dos filtros de transação (transaction filters), independentemente da validação prévia pelo backend.[cite: 3]
 
-As Figura 3 e 4 ilustram essa fragilidade, demonstrando o comportamento do sistema centralizado diante de uma tentativa de fraude ou inconsistência nos registros.[cite: 3]
+As Figuras 3 e 4 demonstram a eficácia da blockchain no bloqueio de transações maliciosas, ilustrando a rejeição de uma tentativa de duplo voto pelo consumo prévio do token.[cite: 3]
 
 **Figura 3 - Demonstração de voto depositado no Candidato A**[cite: 3]
-
-> *(Print do Votifalho registrando voto no Candidato A)*[cite: 3]
-
-Fonte: Elaboração Própria (2026)[cite: 3]
-
-**Figura 4 - Ataque simulado de alteração de voto do Candidato A para o Candidato B**[cite: 3]
-
-> *(Print do Votifalho com ataque simulado de alteração de registro)*[cite: 3]
-
-Fonte: Elaboração Própria (2026)[cite: 3]
-
-Em contrapartida, no Votify, a integridade do pleito foi assegurada pelos mecanismos nativos da rede MultiChain. A emissão de uma credencial digital única para cada eleitor (representada pelo asset VOTE_ELEICAO_001) garantiu que o direito ao voto fosse exercido estritamente uma única vez. Durante a experimentação, qualquer tentativa de repetição de voto utilizando a mesma credencial foi sumariamente rejeitada na camada de consenso da rede através dos filtros de transação (transaction filters), independentemente da validação prévia pelo backend.[cite: 3]
-
-As Figuras 5 e 6 demonstram a eficácia da blockchain no bloqueio de transações maliciosas, ilustrando a rejeição de uma tentativa de duplo voto pelo consumo prévio do token.[cite: 3]
-
-**Figura 5 - Demonstração de voto depositado no Candidato A**[cite: 3]
 
 > *(Print da urna Votify contabilizando voto legítimo na blockchain)*[cite: 3]
 
 Fonte: Elaboração Própria (2026)[cite: 3]
 
-**Figura 6 - Ataque simulado de alteração de voto do Candidato A para o Candidato B**[cite: 3]
+**Figura 4 - Ataque simulado de alteração de voto do Candidato A para o Candidato B**[cite: 3]
 
 > *(Print do Votify bloqueando operação irregular com STDOUT Error Code)*[cite: 3]
 
@@ -266,39 +250,23 @@ A rejeição da tentativa de fraude ocorre em um nível da arquitetura que pode 
 
 Esse retorno comprova que o modelo de integridade do Votify independe das regras da aplicação (backend/frontend). Uma vez que o asset digital representativo do voto (VOTE_ELEICAO_001) foi transferido para o endereço de descarte (burn address) no primeiro voto, o balanço criptográfico se torna zero. Sem a posse prévia da credencial, é tecnologicamente impossível que um invasor ou eleitor injete um voto fraudulento nos streams da urna.[cite: 3]
 
-Além do bloqueio de transações maliciosas, a avaliação de integridade testou a estabilidade da infraestrutura contra interrupções e ataques diretos aos servidores. No Votifalho, a queda do banco de dados central resulta em paralisia total do sistema (single point of failure), e o acesso indevido ao servidor permite a alteração arbitrária dos resultados. Em contraste, o Votify demonstrou Tolerância a Falhas Bizantinas (BFT) robusta. Ao forçar a desconexão abrupta de um nó fiscal ("Nó offline"), a rede MultiChain manteve-se totalmente operacional, dando continuidade à eleição com os nós remanescentes.[cite: 3]
+Além do bloqueio de transações maliciosas, a avaliação de integridade testou a estabilidade da infraestrutura contra interrupções e ataques diretos aos servidores. O Votify demonstrou Tolerância a Falhas Bizantinas (BFT) robusta. Ao forçar a desconexão abrupta de um nó fiscal ("Nó offline"), a rede MultiChain manteve-se operacional, dando continuidade à eleição com os nós remanescentes.[cite: 3]
 
-As figuras 7 e 8 demonstram os comportamentos das arquiteturas referente ao ataque.[cite: 3]
-
-**Figura 7 - Ataque simulado de exclusão do banco de dados central**[cite: 3]
-
-> *(Print evidenciando comando derrubar-banco no Votifalho)*[cite: 3]
-
-Fonte: Elaboração Própria (2026)[cite: 3]
-
-**Figura 8 - Demonstração de resiliência e tolerância a queda de nó no Votify. A rede mantém a disponibilidade e a integridade da contagem por consenso majoritário**[cite: 3]
+**Figura 5 - Demonstração de resiliência e tolerância a queda de nó no Votify. A rede mantém a disponibilidade e a integridade da contagem por consenso majoritário**[cite: 3]
 
 > *(Print demonstrando o Nó 3 Offline e a contagem inalterada)*[cite: 3]
 
 Fonte: Elaboração Própria (2026)[cite: 3]
 
-Da mesma forma, quando se simulou o comprometimento de um nó por um invasor (estado de "Nó comprometido"), na tentativa de injetar dados fraudulentos na apuração, o Votifalho resultou na inserção de 10 votos no banco de dados central. Já no Votify, a divergência foi instantaneamente detectada e rejeitada pelo consenso majoritário da rede.[cite: 3]
+Da mesma forma, quando se simulou o comprometimento de um nó por um invasor (estado de "Nó comprometido"), na tentativa de injetar dados fraudulentos na apuração, a divergência foi instantaneamente detectada e rejeitada pelo consenso majoritário da rede.[cite: 3]
 
-As figuras 9 e 10 demonstram os comportamentos das arquiteturas referente ao ataque.[cite: 3]
-
-**Figura 9 - Simulação de ataque de inserção de votos**[cite: 3]
-
-> *(Print de injeção de votos simulada no Votifalho)*[cite: 3]
-
-Fonte: Elaboração Própria (2026)[cite: 3]
-
-**Figura 10 - Mitigação de ataque de injeção de dados. A adulteração em um nó específico ("Nó 3") não afeta o resultado global no Votify**[cite: 3]
+**Figura 6 - Mitigação de ataque de injeção de dados. A adulteração em um nó específico ("Nó 3") não afeta o resultado global no Votify**[cite: 3]
 
 > *(Print do Votify sinalizando o Nó 3 Comprometido sem afetar a maioria)*[cite: 3]
 
 Fonte: Elaboração Própria (2026)[cite: 3]
 
-No cenário centralizado (Votifalho), a exclusão ou comprometimento do banco de dados configura uma falha catastrófica e praticamente irreparável, anulando o pleito por completo devido à ausência de mecanismos nativos de recuperação de estado. Em contrapartida, a arquitetura do Votify demonstrou resiliência estrutural. Quando a conexão do servidor inoperante foi restabelecida ("Nó restaurado"), o nó reconectou-se automaticamente à malha, sincronizou seu estado local baixando os blocos autênticos validados pelo consenso da rede e retornou à operação normal sem qualquer perda ou corrupção de dados.[cite: 3]
+A arquitetura do Votify também demonstrou resiliência estrutural durante a restauração. Quando a conexão do servidor inoperante foi restabelecida ("Nó restaurado"), o nó reconectou-se automaticamente à malha, sincronizou seu estado local baixando os blocos autênticos validados pelo consenso da rede e retornou à operação normal sem qualquer perda ou corrupção de dados.[cite: 3]
 
 ### Comparativo com Soluções Baseadas em Redes Públicas (BlockVotes)[cite: 3]
 Ao contrastar os resultados do protótipo com os obtidos pelo BlockVotes, observam-se vantagens expressivas em relação à eficiência e viabilidade de implantação em ambientes organizacionais privados. O BlockVotes, por utilizar a rede pública do Bitcoin, atrela o registro do voto à queima financeira de frações de moeda (via operação OP_RETURN) e assegura o anonimato por meio de processamento matemático exaustivo derivado de ring signatures (WU, 2017).[cite: 3]
@@ -310,9 +278,9 @@ Outro resultado expressivo no aspecto da transparência foi a implementação da
 
 Esse mecanismo permite que o eleitor consulte, a qualquer momento e de forma independente, o status da sua transação na rede. A consulta por TXID atesta a inclusão do voto no bloco sem expor a identidade do usuário, garantindo a rastreabilidade (saber que o voto chegou à urna) mantendo intacto o sigilo (ninguém além do detentor do recibo sabe a escolha associada àquele hash).[cite: 3]
 
-A Figura 11 demonstra a interface de emissão e verificação do comprovante criptográfico na plataforma.[cite: 3]
+A Figura 7 demonstra a interface de emissão e verificação do comprovante criptográfico na plataforma.[cite: 3]
 
-**Figura 11 - Verificação de integridade individual via TXID e Receipt Hash.**[cite: 3]
+**Figura 7 - Verificação de integridade individual via TXID e Receipt Hash.**[cite: 3]
 
 > *(Print do painel de Voto e Comprovante do Votify)*[cite: 3]
 
@@ -323,15 +291,15 @@ Uma das contribuições adicionais mais relevantes desta pesquisa para a área d
 
 A apuração confirmou que a matemática da rede é inviolável. A soma total de votos nas urnas correspondeu exatamente à quantidade de credenciais (assets) VOTE_ELEICAO_001 consumidas. Essa verificação foi realizada sem expor em nenhum momento qual eleitor depositou qual voto, superando uma limitação histórica dos sistemas eletrônicos convencionais.[cite: 3]
 
-A Figura 12 exibe o resultado dessa validação independente.[cite: 3]
+A Figura 8 exibe o resultado dessa validação independente.[cite: 3]
 
-**Figura 12 - Painel de auditoria do Votify exibindo a conferência e integridade das transações na blockchain.**[cite: 3]
+**Figura 8 - Painel de auditoria do Votify exibindo a conferência e integridade das transações na blockchain.**[cite: 3]
 
 > *(Print do painel de Auditoria Geral validando a integridade dos nós e blocos)*[cite: 3]
 
 Fonte: Elaboração Própria (2026)[cite: 3]
 
-Em síntese, os resultados obtidos indicam que a arquitetura do Votify oferece um nível de segurança, imutabilidade e auditabilidade superior aos métodos puramente centralizados (Votifalho). Simultaneamente, supera os principais entraves operacionais e financeiros dos sistemas descentralizados públicos (BlockVotes), confirmando a adequação da blockchain permissionada para a modernização do processo de votação eletrônica institucional.[cite: 3]
+Em síntese, os resultados obtidos indicam que a arquitetura do Votify oferece segurança, imutabilidade e auditabilidade, além de superar os principais entraves operacionais e financeiros dos sistemas descentralizados públicos, como o BlockVotes. Esses resultados confirmam a adequação da blockchain permissionada para a modernização do processo de votação eletrônica institucional.[cite: 3]
 
 ## Considerações Finais[cite: 3]
 O presente trabalho alcançou seu objetivo primordial ao projetar, desenvolver e validar o Votify, um sistema de votação eletrônica amparado pela tecnologia blockchain permissionada (MultiChain). A pesquisa demonstrou que a dependência exclusiva de servidores centrais em sistemas eleitorais pode ser efetivamente mitigada, assegurando a integridade e a imutabilidade dos votos sem sacrificar o tempo de resposta ou onerar financeiramente o processo.[cite: 3]

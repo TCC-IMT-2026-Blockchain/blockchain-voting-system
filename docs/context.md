@@ -1,13 +1,13 @@
-# Contexto do Sistema: Blockchain Voting System (Votify / Votifalho)
+# Contexto do Sistema: Blockchain Voting System (Votify)
 
-Este documento descreve o contexto geral do sistema de votação, que demonstra as diferenças entre um sistema tradicional (Votifalho) e um sistema baseado em blockchain (Votify).
+Este documento descreve o contexto geral do Votify, um sistema de votação baseado em blockchain permissionada.
 
 ## Arquitetura Geral
 
 O sistema é dividido em três componentes principais:
 
 1. **Frontend**: Uma aplicação web Single-Page Application (SPA) responsável pela interação com o usuário (eleitor, auditor e administrador).
-2. **Backend**: Uma API HTTP em Node.js (Express) que orquestra a lógica de negócio, conectando o frontend à camada de persistência correspondente (Blockchain ou banco tradicional).
+2. **Backend**: Uma API HTTP em Node.js (Express) que orquestra a lógica de negócio e conecta o frontend à blockchain.
 3. **Blockchain (MultiChain)**: A rede descentralizada utilizada pelo Votify para garantir a integridade, o anonimato e a segurança do processo eleitoral.
 
 ## 1. Backend
@@ -20,9 +20,7 @@ O backend atua como uma ponte entre as requisições web do frontend e a execuç
   - Autenticação e autorização (Admin vs Eleitor).
   - Criptografia: Geração de chaves (simulação), cálculo de HMAC-SHA256 do CPF para proteção de identidade.
   - Integração com a rede blockchain executando comandos via a interface do Python (`blockchain/scripts/votify.py`).
-- **Modos de Operação**:
-  - `Votify` (Seguro): Registra os dados na rede MultiChain de forma anônima e imutável.
-  - `Votifalho` (Inseguro/Tradicional): Utiliza um arquivo JSON simples (`data/traditional-db.json`) para persistência, sendo passível a ataques e alterações indevidas.
+- **Operação**: O Votify registra os dados na rede MultiChain de forma anônima e imutável.
 
 ## 2. Blockchain (Rede MultiChain)
 
@@ -40,7 +38,7 @@ A camada de persistência do sistema Votify é construída usando **MultiChain**
 
 ## 3. Frontend
 
-O frontend provê a interface do usuário, expondo fluxos de configuração, votação, e demonstração de auditoria e falhas (no Votifalho).
+O frontend provê a interface do usuário, expondo fluxos de configuração, votação, verificação de comprovantes e auditoria.
 
 - **Telas**:
   - `/` : Cabine de votação.
