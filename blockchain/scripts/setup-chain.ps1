@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BlockchainDir = Split-Path -Parent $ScriptDir
 
-python "$ScriptDir\votify.py" up
-python "$ScriptDir\votify.py" authorize-slave
-python "$ScriptDir\votify.py" authorize-slave --slave "votify-fiscal-2"
-python "$ScriptDir\votify.py" setup --initial-supply $ElectionSupply
+python "$ScriptDir/votify.py" up
+python "$ScriptDir/votify.py" authorize-slave
+python "$ScriptDir/votify.py" authorize-slave --slave "votify-fiscal-2"
+python "$ScriptDir/votify.py" setup --initial-supply $ElectionSupply

@@ -28,7 +28,7 @@ function pngSize(filePath: string): { w: number; h: number } {
   return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
 
-let cachedPageH: number | null = null;
+// No longer cached — recalculated per print to avoid stale-height clipping.
 
 socket.on("print_receipt", async (payload) => {
   const { txid, hash, qrCodeBase64 } = payload;
@@ -58,6 +58,16 @@ socket.on("print_receipt", async (payload) => {
       logoRenderH = (h / w) * logoRenderW;                         // keep aspect ratio
     }
 
+    // ── Eureka logo dimensions ──
+    const eurekaPath = path.join(process.cwd(), "assets", "logo_eureka_2026_preta.png");
+    const hasEureka  = fs.existsSync(eurekaPath);
+    const eurekaRenderW = 28;
+    let   eurekaRenderH = 28;                                       // ~square fallback
+    if (hasEureka) {
+      const { w, h } = pngSize(eurekaPath);
+      eurekaRenderH = (h / w) * eurekaRenderW;
+    }
+
     // ── QR buffer (reused across passes) ──
     let qrBuf: Buffer | null = null;
     if (qrCodeBase64) {
@@ -69,11 +79,29 @@ socket.on("print_receipt", async (payload) => {
     function draw(doc: InstanceType<typeof PDFDocument>): number {
       let y = PAD;
 
-      // 1. Logo
-      if (hasLogo) {
-        doc.image(logoPath, (W - logoRenderW) / 2, y, { width: logoRenderW });
-        y += logoRenderH;
+      // 1. Header row: Eureka (left) | Votify (center) | Grupo CMD06 (right)
+      const cmdFontSize = 7;
+      doc.fontSize(cmdFontSize);
+      const cmdTextH = doc.currentLineHeight();
+      const rowH = Math.max(
+        hasEureka ? eurekaRenderH : 0,
+        hasLogo   ? logoRenderH   : 0,
+        cmdTextH
+      );
+
+      if (hasEureka) {
+        doc.image(eurekaPath, M, y + (rowH - eurekaRenderH) / 2, { width: eurekaRenderW });
       }
+
+      if (hasLogo) {
+        doc.image(logoPath, (W - logoRenderW) / 2, y + (rowH - logoRenderH) / 2, { width: logoRenderW });
+      }
+
+      doc.fontSize(cmdFontSize);
+      const cmdW = doc.widthOfString("Grupo CMD06");
+      doc.text("Grupo CMD06", W - M - cmdW, y + (rowH - cmdTextH) / 2, { lineBreak: false });
+
+      y += rowH;
 
       // 2. Title
       y += GAP;
@@ -99,30 +127,27 @@ socket.on("print_receipt", async (payload) => {
         y += QR_W;
       }
 
-      // 6. "Validar em:" + full URL (tiny gap — QR image has internal white border)
-      y += 2;
-      doc.fontSize(6).text("Validar em:", M, y, { align: "center", width: TW });
-      doc.fontSize(5).text(fullUrl, M, doc.y, { align: "center", width: TW });
+      // 6. "Validar em:" + full URL
+      y += 4;
+      const valFontSize = 5;
+      doc.fontSize(valFontSize);
+      const valText = `Validar em: ${fullUrl}`;
+      const valTextH = doc.heightOfString(valText, { width: TW });
+      doc.text(valText, M, y, { align: "center", width: TW });
+      y += valTextH;
 
-      return doc.y;   // final content bottom
+      return y;   // final content bottom (manual tracking)
     }
 
     // ── Pass 1: measure on a tall scratch page (margin:0 = no auto page-break) ──
-    let pageH = cachedPageH;
+    const scratchDoc = new PDFDocument({ size: [W, 800], margin: 0 });
+    scratchDoc.pipe(fs.createWriteStream(tmpPdfPath));
+    const contentBottom = draw(scratchDoc);
+    scratchDoc.end();
+    await new Promise<void>((r) => setTimeout(r, 80));
 
-    if (!pageH) {
-      const scratchDoc = new PDFDocument({ size: [W, 800], margin: 0 });
-      scratchDoc.pipe(fs.createWriteStream(tmpPdfPath));
-      const contentBottom = draw(scratchDoc);
-      scratchDoc.end();
-      await new Promise<void>((r) => setTimeout(r, 80));
-
-      pageH = contentBottom + PAD;
-      cachedPageH = pageH;
-      console.log(`[PrintAgent] Altura calculada do recibo: ${pageH.toFixed(1)}pt`);
-    } else {
-      console.log(`[PrintAgent] Altura usando cache: ${pageH.toFixed(1)}pt`);
-    }
+    const pageH = contentBottom + 8;  // generous bottom margin to avoid clipping
+    console.log(`[PrintAgent] Altura calculada do recibo: ${pageH.toFixed(1)}pt`);
 
     // ── Pass 2: render on exact-height page ──
     const doc = new PDFDocument({ size: [W, pageH], margin: 0 });
