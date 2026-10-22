@@ -1,0 +1,25 @@
+{
+  "name": "print-numbers",
+  "version": "1.0.0",
+  "description": "Impressão sequencial de números (000 a 999) com retomada automática de estado",
+  "main": "index.ts",
+  "scripts": {
+    "start": "tsx index.ts",
+    "reset": "tsx index.ts --reset"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.4",
+    "pdf-to-printer": "^5.8.1",
+    "pdfkit": "^0.20.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/pdfkit": "^0.17.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

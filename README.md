@@ -11,10 +11,11 @@ votação e permitir auditoria independente por qualquer nó participante.
 ## Partes do Projeto
 
 ```text
-blockchain  Camada MultiChain, scripts, streams, assets, filtros e auditoria
-backend     API de integração entre aplicação, demonstração e blockchain
-frontend    Urna oficial simples: configuração, voto e auditoria
-visualizer  Tela didática independente que anima os bastidores do sistema
+blockchain   Camada MultiChain, scripts, streams, assets, filtros e auditoria
+backend      API de integração entre aplicação, demonstração e blockchain
+frontend     Urna oficial simples: configuração, voto e auditoria
+print-agent  Agente de impressão térmica de comprovantes (fila FIFO serial)
+visualizer   Tela didática independente que anima os bastidores do sistema
 ```
 
 ## Fluxo Atual
@@ -70,6 +71,19 @@ cd visualizer
 npm install
 npm run dev -- --host 0.0.0.0 --port 5174
 ```
+
+Subir agente de impressão (`print-agent`):
+
+```powershell
+cd print-agent
+npm install
+npm run start:print
+```
+
+Configurações do `print-agent/.env` (veja `print-agent/.env.example` e `print-agent/README.md`):
+
+- `PRINT_INTERVAL_MS=5000`: intervalo em milissegundos (padrão `5000`) aguardado após o término real de uma impressão antes de processar o próximo item da fila FIFO.
+- `PRINT_MAX_RETRIES=2`: número máximo de retentativas por comprovante em caso de falha na impressão.
 
 URLs principais:
 
