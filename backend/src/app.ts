@@ -13,6 +13,7 @@ import { requireAuth, requireRole, type AuthenticatedRequest } from "./http/auth
 import { generateQrCodeBase64 } from "./services/qrCodeService.js";
 import { dispatchPrintJob } from "./server.js";
 import { getJob } from "./services/printJobRegistry.js";
+import type { Election, RegisteredVoter } from "./domain/types.js";
 
 export const app = express();
 
@@ -51,6 +52,30 @@ function ensureElectionIsUnlocked(election: { governanceLockedAt?: string | null
       "A eleição já foi travada e não pode mais ser configurada."
     );
   }
+}
+
+function applyChainCredential(
+  voter: RegisteredVoter,
+  credential: {
+    voter_address: string;
+    token_transfer_txid: string | null;
+    credential_record_txid: string | null;
+  }
+) {
+  voter.voterAddress = credential.voter_address;
+  voter.tokenTransferTxid = credential.token_transfer_txid ?? undefined;
+  voter.credentialRecordTxid = credential.credential_record_txid ?? undefined;
+}
+
+async function restoreVoterCredential(election: Election, voter: RegisteredVoter) {
+  if (voter.voterAddress) return true;
+
+  const credential = await blockchain.getCredential(election.chainElectionId, voter.voterIdHash);
+  if (!credential?.voter_address) return false;
+
+  applyChainCredential(voter, credential);
+  store.save();
+  return true;
 }
 
 type AuditNodeId = "master" | "fiscal-1" | "fiscal-2";
@@ -718,6 +743,7 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
       voter.credentialRecordTxid = credential.credential_record_txid;
       voter.voterAddress = credential.voter_address;
       voter.tokenTransferTxid = credential.token_transfer_txid;
+      store.save();
       issuedCredentials.push({
         voterIdHash: voter.voterIdHash,
         voterAddress: credential.voter_address,
@@ -749,6 +775,53 @@ router.post("/admin/elections/:electionId/lock", requireAuth, requireRole("ADMIN
   }
 });
 
+router.post(
+  "/admin/elections/:electionId/credentials/reconcile",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
+      if (!election.governanceLockedAt) {
+        throw new HttpError(
+          409,
+          "ELECTION_NOT_LOCKED",
+          "A sincronização de credenciais só pode ser feita depois de travar a eleição."
+        );
+      }
+
+      const result = await blockchain.listCredentials(election.chainElectionId);
+      const credentialsByVoter = new Map(
+        result.credentials.map((credential) => [credential.voter_id_hash, credential])
+      );
+      const voters = store.all().voters.filter((item) => item.electionId === election.id);
+      let repaired = 0;
+
+      for (const voter of voters) {
+        if (voter.voterAddress) continue;
+        const credential = credentialsByVoter.get(voter.voterIdHash);
+        if (!credential?.voter_address) continue;
+        applyChainCredential(voter, credential);
+        repaired += 1;
+      }
+
+      if (repaired > 0) store.save();
+      const missing = voters.filter((voter) => !voter.voterAddress).length;
+
+      res.json({
+        data: {
+          voters: voters.length,
+          credentialsOnChain: credentialsByVoter.size,
+          repaired,
+          missing
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 router.post("/elections/:electionId/credentials", requireAuth, async (req, res, next) => {
   try {
     const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
@@ -766,6 +839,10 @@ router.post("/elections/:electionId/credentials", requireAuth, async (req, res, 
     const publicKey = derivePublicKey(privateKeySimulation);
     if (publicKey !== voter.publicKey) {
       throw new HttpError(403, "PRIVATE_KEY_INVALID", "A chave privada não corresponde à chave pública cadastrada.");
+    }
+
+    if (!voter.voterAddress) {
+      await restoreVoterCredential(election, voter);
     }
 
     if (!voter.voterAddress) {
@@ -825,6 +902,10 @@ router.post("/elections/:electionId/votes", requireAuth, async (req, res, next) 
     const voter = store.all().voters.find((item) => item.electionId === election.id && item.publicKey === publicKey);
     if (!voter) {
       throw new HttpError(404, "VOTER_NOT_REGISTERED", "Eleitor não cadastrado para esta eleição.");
+    }
+
+    if (!voter.voterAddress) {
+      await restoreVoterCredential(election, voter);
     }
 
     if (!voter.voterAddress) {

@@ -116,6 +116,14 @@ function withNode(args: string[], container: string) {
   return [...args, "--master", container];
 }
 
+export type ChainCredential = {
+  election_id: string;
+  voter_id_hash: string;
+  voter_address: string;
+  token_transfer_txid: string | null;
+  credential_record_txid: string | null;
+};
+
 export const blockchain = {
   hashCpf(cpf: string, electionId: string) {
     return runBlockchain([
@@ -152,6 +160,22 @@ export const blockchain = {
       voter_address: string;
       token_transfer_txid: string;
       credential_record_txid: string;
+    }>;
+  },
+
+  getCredential(electionId: string, voterIdHash: string) {
+    return runBlockchain([
+      "get-credential",
+      "--election-id",
+      electionId,
+      "--voter-id-hash",
+      voterIdHash
+    ]) as Promise<ChainCredential | null>;
+  },
+
+  listCredentials(electionId: string) {
+    return runBlockchain(["list-credentials", "--election-id", electionId]) as Promise<{
+      credentials: ChainCredential[];
     }>;
   },
 
