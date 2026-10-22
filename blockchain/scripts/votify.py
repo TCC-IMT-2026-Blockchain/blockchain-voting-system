@@ -567,6 +567,46 @@ def data_json(item: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def credential_from_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    payload = data_json(item)
+    if not payload or not payload.get("voter_id_hash") or not payload.get("voter_address"):
+        return None
+    return {
+        "election_id": payload.get("election_id"),
+        "voter_id_hash": payload.get("voter_id_hash"),
+        "voter_address": payload.get("voter_address"),
+        "token_transfer_txid": payload.get("token_transfer_txid"),
+        "credential_record_txid": item.get("txid"),
+    }
+
+
+def get_credential(mc: MultiChain, election_id: str, voter_id_hash: str) -> dict[str, Any] | None:
+    key = f"credential:{election_id}:{voter_id_hash}"
+    items = mc.cli(["liststreamkeyitems", CREDENTIALS_STREAM, key, "true", "100"], check=False)
+    if not isinstance(items, list):
+        return None
+
+    for item in reversed(items):
+        credential = credential_from_item(item)
+        if credential and credential.get("election_id") == election_id:
+            return credential
+    return None
+
+
+def list_credentials(mc: MultiChain, election_id: str) -> list[dict[str, Any]]:
+    items = mc.cli(["liststreamitems", CREDENTIALS_STREAM, "true", "100000", "0"], check=False)
+    if not isinstance(items, list):
+        return []
+
+    credentials: dict[str, dict[str, Any]] = {}
+    for item in items:
+        credential = credential_from_item(item)
+        if not credential or credential.get("election_id") != election_id:
+            continue
+        credentials[str(credential["voter_id_hash"])] = credential
+    return list(credentials.values())
+
+
 def asset_sent_to_address_in_tx(mc: MultiChain, txid: str, address: str, asset: str) -> float:
     tx = mc.cli(["getrawtransaction", txid, "1"], check=False)
     if not isinstance(tx, dict):
@@ -747,6 +787,18 @@ def cmd_issue_credential(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def cmd_get_credential(args: argparse.Namespace) -> None:
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
+    result = get_credential(mc, args.election_id, args.voter_id_hash)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_list_credentials(args: argparse.Namespace) -> None:
+    mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
+    result = list_credentials(mc, args.election_id)
+    print(json.dumps({"credentials": result}, ensure_ascii=False))
+
+
 def cmd_cast_vote(args: argparse.Namespace) -> None:
     mc = MultiChain(args.chain, args.master, args.slave, args.slave2)
     result = cast_vote(mc, args.election_id, args.choice, args.voter_address, args.asset)
@@ -859,6 +911,19 @@ def build_parser() -> argparse.ArgumentParser:
     issue.add_argument("--voter-address")
     issue.add_argument("--force", action="store_true")
     issue.set_defaults(func=cmd_issue_credential)
+
+    get_credential_cmd = sub.add_parser("get-credential", help="read one issued credential from the blockchain")
+    add_common(get_credential_cmd)
+    get_credential_cmd.add_argument("--election-id", required=True)
+    get_credential_cmd.add_argument("--voter-id-hash", required=True)
+    get_credential_cmd.set_defaults(func=cmd_get_credential)
+
+    list_credentials_cmd = sub.add_parser(
+        "list-credentials", help="read all issued credentials for one election"
+    )
+    add_common(list_credentials_cmd)
+    list_credentials_cmd.add_argument("--election-id", required=True)
+    list_credentials_cmd.set_defaults(func=cmd_list_credentials)
 
     vote = sub.add_parser("cast-vote", help="publish a vote and burn exactly one voting token")
     add_common(vote)
