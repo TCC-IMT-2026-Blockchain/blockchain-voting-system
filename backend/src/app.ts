@@ -782,14 +782,6 @@ router.post(
   async (req, res, next) => {
     try {
       const election = getElectionOrThrow(routeParam(req.params.electionId, "electionId"));
-      if (!election.governanceLockedAt) {
-        throw new HttpError(
-          409,
-          "ELECTION_NOT_LOCKED",
-          "A sincronização de credenciais só pode ser feita depois de travar a eleição."
-        );
-      }
-
       const result = await blockchain.listCredentials(election.chainElectionId);
       const credentialsByVoter = new Map(
         result.credentials.map((credential) => [credential.voter_id_hash, credential])
